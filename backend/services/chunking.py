@@ -1,11 +1,16 @@
 import re
+from collections import Counter
 from dataclasses import dataclass
 
-import pdfplumber
+import fitz  # PyMuPDF
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import settings
+
+_DIGIT_RUN = re.compile(r"\d+")
+BOILERPLATE_FREQUENCY_THRESHOLD = 0.6
+BOILERPLATE_MIN_PAGES = 3
 
 
 CLAUSE_PATTERN = re.compile(
@@ -30,26 +35,120 @@ class TextChunk:
 
 def extract_pages(pdf_path: str) -> list[PageText]:
     pages: list[PageText] = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for index, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
+    with fitz.open(pdf_path) as pdf:
+        for index, page in enumerate(pdf, start=1):
+            text = page.get_text()
             pages.append(PageText(page_number=index, text=text.strip()))
     return pages
 
 
-def _split_on_clauses(text: str) -> list[str]:
-    matches = list(CLAUSE_PATTERN.finditer(text))
-    if len(matches) < 2:
-        return []
+EDGE_LINES = 2
 
-    segments: list[str] = []
+
+def _normalize_line(line: str) -> str:
+    # Collapses digit runs so a header/footer that only varies by page
+    # number (or a similar counter) still matches across pages.
+    return _DIGIT_RUN.sub("#", line.strip())
+
+
+def _edge_line_indices(num_lines: int) -> set[int]:
+    # Headers/footers live at the physical top/bottom of a page; restricting
+    # detection to these edges (rather than the whole page) keeps mid-page
+    # content — e.g. an isolated numerator in a stacked formula layout —
+    # from ever being mistaken for a repeating page number.
+    indices = set(range(min(EDGE_LINES, num_lines)))
+    indices |= set(range(max(0, num_lines - EDGE_LINES), num_lines))
+    return indices
+
+
+def strip_boilerplate(
+    pages: list[PageText], norm_reference: str | None = None
+) -> tuple[list[PageText], str | None]:
+    """Remove lines repeated near-identically across most pages' top/bottom
+    edges (running headers, edition stamps, page-number footers) before
+    chunking.
+
+    A line that instead varies per page (e.g. a running section title) has a
+    different normalized form on each page and is left alone — repetition
+    frequency is the signal, not position on the page.
+    """
+    if len(pages) < BOILERPLATE_MIN_PAGES:
+        return pages, None
+
+    page_lines = [page.text.split("\n") for page in pages]
+
+    normalized_counts: Counter[str] = Counter()
+    raw_variants: dict[str, Counter[str]] = {}
+    for lines in page_lines:
+        seen_this_page = set()
+        for i in _edge_line_indices(len(lines)):
+            norm = _normalize_line(lines[i])
+            if not norm or norm in seen_this_page:
+                continue
+            seen_this_page.add(norm)
+            normalized_counts[norm] += 1
+            raw_variants.setdefault(norm, Counter())[lines[i].strip()] += 1
+
+    threshold = max(BOILERPLATE_MIN_PAGES, int(len(pages) * BOILERPLATE_FREQUENCY_THRESHOLD))
+    boilerplate_norms = {norm for norm, count in normalized_counts.items() if count >= threshold}
+
+    edition: str | None = None
+    descriptive_norms = [n for n in boilerplate_norms if any(ch.isalpha() for ch in n)]
+    if descriptive_norms:
+        # A repeating line that actually names this document (contains the
+        # already-identified norm reference, e.g. "EN 1992-1-1") is the
+        # edition stamp; other repeating lines are more likely to be
+        # unrelated boilerplate (library stamps, scan-session markers) —
+        # which tend to run longer, so prefer the shortest as a fallback.
+        matching = [
+            n for n in descriptive_norms
+            if norm_reference and norm_reference.lower() in raw_variants[n].most_common(1)[0][0].lower()
+        ]
+        best_norm = min(matching or descriptive_norms, key=len)
+        edition = raw_variants[best_norm].most_common(1)[0][0]
+
+    cleaned_pages = []
+    for page, lines in zip(pages, page_lines):
+        edge_idx = _edge_line_indices(len(lines))
+        kept = [
+            line
+            for i, line in enumerate(lines)
+            if not (i in edge_idx and _normalize_line(line) in boilerplate_norms)
+        ]
+        cleaned_pages.append(PageText(page_number=page.page_number, text="\n".join(kept).strip()))
+    return cleaned_pages, edition
+
+
+def _split_on_clauses(
+    text: str, carried_heading: str
+) -> tuple[list[tuple[str, str]], str]:
+    """Splits a page's text at clause-number boundaries (e.g. "6.2.2 ...").
+
+    Clauses routinely span multiple pages in these documents, so text
+    before a page's first match (or an entire page with no match) belongs
+    to whichever clause was still open from a previous page — carried_heading
+    tracks that across the whole document, not just within one page.
+    Returns (list of (heading, segment_text)), updated carried_heading).
+    """
+    matches = list(CLAUSE_PATTERN.finditer(text))
+    if not matches:
+        return [(carried_heading, text)], carried_heading
+
+    segments: list[tuple[str, str]] = []
+    if matches[0].start() > 0:
+        leading = text[: matches[0].start()].strip()
+        if leading:
+            segments.append((carried_heading, leading))
+
     for i, match in enumerate(matches):
         start = match.start()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         segment = text[start:end].strip()
         if segment:
-            segments.append(segment)
-    return segments
+            carried_heading = segment.split("\n", 1)[0].strip()
+            segments.append((carried_heading, segment))
+
+    return segments, carried_heading
 
 
 def _token_splitter() -> RecursiveCharacterTextSplitter:
@@ -75,19 +174,26 @@ def chunk_pages(pages: list[PageText], norm_reference: str | None) -> list[TextC
     splitter = _token_splitter()
     chunks: list[TextChunk] = []
     chunk_index = 0
+    carried_heading = ""
 
     for page in pages:
         if not page.text:
             continue
 
-        clause_segments = _split_on_clauses(page.text)
-        segments = clause_segments if clause_segments else [page.text]
+        segments, carried_heading = _split_on_clauses(page.text, carried_heading)
 
-        for segment in segments:
+        for heading, segment in segments:
             for piece in splitter.split_text(segment):
                 piece = piece.strip()
                 if not piece:
                     continue
+                # A clause spanning multiple split pieces (or multiple
+                # pages) loses its own heading on every piece but the
+                # first — re-attach it (it's real text from this clause's
+                # own first line, not invented) so every piece stays
+                # identifiable by clause number.
+                if heading and not piece.startswith(heading):
+                    piece = f"{heading}\n{piece}"
                 chunks.append(
                     TextChunk(
                         text=piece,

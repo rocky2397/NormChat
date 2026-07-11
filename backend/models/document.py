@@ -14,6 +14,7 @@ class Document(Base):
     project_id: Mapped[str] = mapped_column(String, ForeignKey("projects.id"), nullable=False)
     filename: Mapped[str] = mapped_column(String, nullable=False)
     norm_reference: Mapped[str | None] = mapped_column(String, nullable=True)
+    edition: Mapped[str | None] = mapped_column(String, nullable=True)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)

@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from config import settings
 from models.chat import ChatResponse, SourceChunk
 from services.embeddings import get_embeddings
+from services.reranking import bm25_rank_ids, reciprocal_rank_fusion, rerank_ids
 from services.storage import get_collection
 
 SYSTEM_PROMPT = """Du bist ein technischer Assistent für Bauingenieure und Architekten in der DACH-Region.
@@ -20,6 +21,8 @@ def _format_context(sources: list[SourceChunk]) -> str:
     blocks = []
     for i, source in enumerate(sources, start=1):
         ref = source.norm_reference or source.filename
+        if source.edition:
+            ref = f"{ref} ({source.edition})"
         blocks.append(
             f"[Quelle {i}] {ref}, Seite {source.page_number}:\n{source.chunk_text}"
         )
@@ -27,28 +30,45 @@ def _format_context(sources: list[SourceChunk]) -> str:
 
 
 def retrieve_sources(project_id: str, question: str) -> list[SourceChunk]:
+    collection = get_collection(project_id)
+    total = collection.count()
+    if total == 0:
+        return []
+    pool_size = min(settings.retrieval_candidate_pool, total)
+
     embeddings = get_embeddings()
     query_vector = embeddings.embed_query(question)
-    collection = get_collection(project_id)
-
-    results = collection.query(
+    vector_results = collection.query(
         query_embeddings=[query_vector],
-        n_results=settings.top_k_chunks,
-        include=["documents", "metadatas", "distances"],
+        n_results=pool_size,
+        include=["documents", "metadatas"],
     )
+    vector_ids = vector_results["ids"][0]
+
+    # BM25 needs the full corpus for term-frequency stats; catches chunks
+    # that share the question's exact terminology but rank low on pure
+    # embedding similarity.
+    all_chunks = collection.get(include=["documents", "metadatas"])
+    all_ids = all_chunks["ids"]
+    id_to_doc = dict(zip(all_ids, all_chunks["documents"]))
+    id_to_meta = dict(zip(all_ids, all_chunks["metadatas"]))
+    bm25_ids = bm25_rank_ids(question, all_ids, all_chunks["documents"])[:pool_size]
+
+    fused_ids = reciprocal_rank_fusion(vector_ids, bm25_ids)[:pool_size]
+    fused_docs = [id_to_doc[cid] for cid in fused_ids]
+    final_ids = rerank_ids(question, fused_ids, fused_docs, settings.top_k_chunks)
 
     sources: list[SourceChunk] = []
-    if not results["documents"] or not results["documents"][0]:
-        return sources
-
-    for doc_text, metadata in zip(results["documents"][0], results["metadatas"][0]):
+    for cid in final_ids:
+        meta = id_to_meta[cid]
         sources.append(
             SourceChunk(
-                document_id=metadata["document_id"],
-                filename=metadata["source_filename"],
-                page_number=int(metadata["page_number"]),
-                chunk_text=doc_text,
-                norm_reference=metadata.get("norm_reference") or None,
+                document_id=meta["document_id"],
+                filename=meta["source_filename"],
+                page_number=int(meta["page_number"]),
+                chunk_text=id_to_doc[cid],
+                norm_reference=meta.get("norm_reference") or None,
+                edition=meta.get("edition") or None,
             )
         )
     return sources

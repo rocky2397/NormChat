@@ -3,7 +3,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from models.document import Document
-from services.chunking import chunk_pages, extract_pages
+from services.chunking import chunk_pages, extract_pages, strip_boilerplate
 from services.embeddings import get_embeddings
 from services.storage import (
     extract_norm_reference,
@@ -34,12 +34,14 @@ def ingest_document(
     pages = extract_pages(str(dest_path))
     first_page_text = pages[0].text if pages else ""
     norm_reference = extract_norm_reference(safe_name, first_page_text)
-    chunks = chunk_pages(pages, norm_reference)
+    cleaned_pages, edition = strip_boilerplate(pages, norm_reference)
+    chunks = chunk_pages(cleaned_pages, norm_reference)
 
     document = Document(
         project_id=project_id,
         filename=safe_name,
         norm_reference=norm_reference,
+        edition=edition,
         file_path=str(dest_path),
         page_count=len(pages),
         chunk_count=len(chunks),
@@ -61,6 +63,7 @@ def ingest_document(
                 "chunk_index": chunk.chunk_index,
                 "source_filename": safe_name,
                 "norm_reference": chunk.norm_reference or "",
+                "edition": edition or "",
             }
             for chunk in chunks
         ]

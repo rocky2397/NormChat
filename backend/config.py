@@ -15,9 +15,11 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     database_url: str = "sqlite:///./normchat.db"
     storage_dir: Path = Path(__file__).parent / "storage"
-    top_k_chunks: int = 5
+    top_k_chunks: int = 10
     chunk_size: int = 512
     chunk_overlap: int = 64
+    retrieval_candidate_pool: int = 50
+    reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
 
 settings = Settings()

@@ -1,6 +1,10 @@
 # OS
 .DS_Store
 Thumbs.db
+._*
+
+# Claude Code harness (local, not project content)
+.claude/
 
 # Environment and secrets
 .env
@@ -30,6 +34,7 @@ frontend/.npm-cache/
 backend/storage/
 *.db
 chroma/
+.hf_cache/
 
 # IDE
 .idea/

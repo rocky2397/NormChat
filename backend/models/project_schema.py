@@ -22,6 +22,7 @@ class DocumentResponse(BaseModel):
     project_id: str
     filename: str
     norm_reference: str | None
+    edition: str | None
     page_count: int
     chunk_count: int
     created_at: datetime
