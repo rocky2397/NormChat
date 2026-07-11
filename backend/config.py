@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     top_k_chunks: int = 10
     chunk_size: int = 512
     chunk_overlap: int = 64
-    retrieval_candidate_pool: int = 50
+    retrieval_candidate_pool: int = 100
     reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
 
