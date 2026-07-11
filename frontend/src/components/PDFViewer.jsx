@@ -43,6 +43,7 @@ export default function PDFViewer({ documentId, filename, pageNumber = 1, highli
   const overlayRef = useRef(null)
   const containerRef = useRef(null)
   const pdfRef = useRef(null)
+  const pdfDocIdRef = useRef(null)
   const [currentPage, setCurrentPage] = useState(pageNumber)
   const [totalPages, setTotalPages] = useState(0)
   const [scale, setScale] = useState(1.2)
@@ -65,6 +66,7 @@ export default function PDFViewer({ documentId, filename, pageNumber = 1, highli
         const pdf = await loadingTask.promise
         if (cancelled) return
         pdfRef.current = pdf
+        pdfDocIdRef.current = documentId
         setTotalPages(pdf.numPages)
       } catch (err) {
         if (!cancelled) {
@@ -89,6 +91,13 @@ export default function PDFViewer({ documentId, filename, pageNumber = 1, highli
       const canvas = canvasRef.current
       const overlay = overlayRef.current
       if (!pdf || !canvas || !overlay) return
+      // pdfRef is a mutable ref, not React state — while a new document is
+      // still loading (async), it can still point at the previous PDF. If
+      // that stale PDF has fewer pages than the newly requested page,
+      // getPage() throws. The loadPdf effect will update totalPages (and
+      // this effect's deps) once the right document is actually ready, so
+      // it's safe to just wait rather than render against the wrong file.
+      if (pdfDocIdRef.current !== documentId) return
 
       setLoading(true)
       try {
@@ -122,6 +131,7 @@ export default function PDFViewer({ documentId, filename, pageNumber = 1, highli
           overlay.appendChild(div)
         })
       } catch (err) {
+        console.error('PDFViewer render error:', err)
         if (!cancelled) setError('Seite konnte nicht gerendert werden.')
       } finally {
         if (!cancelled) setLoading(false)
@@ -132,7 +142,7 @@ export default function PDFViewer({ documentId, filename, pageNumber = 1, highli
     return () => {
       cancelled = true
     }
-  }, [currentPage, scale, highlightText, totalPages])
+  }, [currentPage, scale, highlightText, totalPages, documentId])
 
   if (!documentId) {
     return (
