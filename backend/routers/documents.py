@@ -9,6 +9,7 @@ from models.project import Project
 from models.project_schema import DocumentResponse
 from models.document import Document
 from services.ingestion import delete_document_vectors, ingest_document, remove_document_file
+from services.pdf_highlight import build_highlighted_copy
 
 router = APIRouter(tags=["documents"])
 
@@ -74,6 +75,30 @@ def get_document_file(document_id: str, db: Session = Depends(get_db)):
         path,
         media_type="application/pdf",
         filename=document.filename,
+    )
+
+
+@router.get("/documents/{document_id}/highlighted")
+def get_highlighted_document_file(
+    document_id: str,
+    page: int,
+    text: str = "",
+    db: Session = Depends(get_db),
+):
+    document = db.get(Document, document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden")
+
+    path = Path(document.file_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden")
+
+    highlighted_path = build_highlighted_copy(path, page, text)
+    return FileResponse(
+        highlighted_path,
+        media_type="application/pdf",
+        filename=document.filename,
+        content_disposition_type="inline",
     )
 
 

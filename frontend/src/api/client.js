@@ -51,6 +51,11 @@ export function documentFileUrl(documentId) {
   return `/api/documents/${documentId}/file`
 }
 
+export function documentHighlightedUrl(documentId, pageNumber, highlightText) {
+  const params = new URLSearchParams({ page: String(pageNumber), text: highlightText || '' })
+  return `/api/documents/${documentId}/highlighted?${params.toString()}`
+}
+
 export async function sendChatMessage(projectId, question) {
   const { data } = await api.post(`/projects/${projectId}/chat`, { question })
   return data
