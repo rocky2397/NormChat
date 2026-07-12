@@ -4,7 +4,7 @@ Thumbs.db
 ._*
 
 # Claude Code harness (local, not project content)
-.claude/
+.claude/settings.local.json
 
 # Environment and secrets
 .env
