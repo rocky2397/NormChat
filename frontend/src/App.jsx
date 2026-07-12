@@ -9,7 +9,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<ProjectList />} />
         <Route path="/projects/:projectId" element={<ProjectView />} />
-        <Route path="/documents/:documentId/viewer" element={<PDFViewerPage />} />
+        <Route path="/viewer" element={<PDFViewerPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

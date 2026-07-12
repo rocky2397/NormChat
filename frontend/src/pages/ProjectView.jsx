@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   deleteDocument,
@@ -17,6 +17,8 @@ export default function ProjectView() {
   const [projects, setProjects] = useState([])
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
+  const pdfPopupRef = useRef(null)
+  const pdfPopupReadyRef = useRef(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -38,6 +40,16 @@ export default function ProjectView() {
     refresh()
   }, [refresh])
 
+  useEffect(() => {
+    function handleMessage(event) {
+      if (event.origin !== window.location.origin) return
+      if (event.data !== 'normchat-viewer-ready' || event.source !== pdfPopupRef.current) return
+      pdfPopupReadyRef.current = true
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
+
   async function handleUpload(file, onProgress) {
     await uploadDocument(projectId, file, onProgress)
     await refresh()
@@ -49,16 +61,32 @@ export default function ProjectView() {
     await refresh()
   }
 
-  function handleOpenSource(source) {
-    const { document_id: documentId, page_number: pageNumber, chunk_text: highlightText, filename } = source
+  function handleOpenSource(sources, initialIndex) {
+    const payload = { sources, initialIndex }
     if (window.electronAPI) {
-      window.electronAPI.openPdfWindow(documentId, pageNumber, highlightText, filename)
+      window.electronAPI.openPdfWindow(payload)
       return
     }
-    // Fallback outside Electron (e.g. plain browser during dev): a normal
-    // browser popup pointed at the same standalone viewer route.
-    const search = new URLSearchParams({ page: String(pageNumber), text: highlightText, filename }).toString()
-    window.open(`/documents/${documentId}/viewer?${search}`, '_blank', 'width=1000,height=1100')
+    // Fallback outside Electron (e.g. plain browser during dev): reuse one
+    // named popup window (browsers route repeat window.open calls with the
+    // same name to the existing window) and sync its content via
+    // postMessage — the payload is too large for a URL/query string.
+    const isFreshPopup = !pdfPopupRef.current || pdfPopupRef.current.closed
+    const popup = window.open('/viewer', 'normchat-pdf-viewer', 'width=1000,height=1100')
+    if (!popup) return
+    if (isFreshPopup) pdfPopupReadyRef.current = false
+    pdfPopupRef.current = popup
+    popup.focus()
+
+    let attemptsLeft = 40
+    const trySend = () => {
+      if (pdfPopupReadyRef.current) {
+        popup.postMessage({ type: 'update-sources', payload }, window.location.origin)
+      } else if (attemptsLeft-- > 0) {
+        setTimeout(trySend, 50)
+      }
+    }
+    trySend()
   }
 
   if (loading && !project) {

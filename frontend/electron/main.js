@@ -18,6 +18,7 @@ const PRELOAD_PATH = path.join(__dirname, 'preload.cjs')
 
 let backendProcess = null
 let mainWindow = null
+let pdfWindow = null
 
 function startBackend() {
   backendProcess = spawn(
@@ -60,31 +61,45 @@ async function createWindow() {
   }
 }
 
-async function createPdfWindow({ documentId, pageNumber, highlightText, filename }) {
-  const pdfWindow = new BrowserWindow({
+async function openOrUpdatePdfWindow(payload) {
+  // Reuse one window across citation clicks — pushing new data over IPC —
+  // rather than spawning a new window per click, which was the whole point
+  // of the stepper: one place to page through all of an answer's sources.
+  if (pdfWindow && !pdfWindow.isDestroyed()) {
+    pdfWindow.webContents.send('update-sources', payload)
+    pdfWindow.focus()
+    return
+  }
+
+  pdfWindow = new BrowserWindow({
     width: 1000,
     height: 1100,
     webPreferences: {
       // Required for Chromium's built-in PDF viewer, which the standalone
       // viewer page embeds directly via an <iframe>.
       plugins: true,
+      preload: PRELOAD_PATH,
     },
   })
+  pdfWindow.on('closed', () => {
+    pdfWindow = null
+  })
 
-  const search = new URLSearchParams({
-    page: String(pageNumber),
-    text: highlightText || '',
-    filename: filename || '',
-  }).toString()
+  // Citation text for a full answer's sources easily runs past the ~16KB
+  // header-size limit Node's HTTP server enforces if stuffed into a query
+  // string (hit a 431 in testing) — push the payload over IPC once the
+  // page has actually loaded and is listening, instead.
+  pdfWindow.webContents.once('did-finish-load', () => {
+    pdfWindow.webContents.send('update-sources', payload)
+  })
 
   if (isDev) {
-    await pdfWindow.loadURL(`${FRONTEND_DEV_URL}/documents/${documentId}/viewer?${search}`)
+    await pdfWindow.loadURL(`${FRONTEND_DEV_URL}/viewer`)
   } else {
     // Production packaging (static build + routing) hasn't been set up
     // yet — this path is unverified until that lands.
     await pdfWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
-      hash: `/documents/${documentId}/viewer`,
-      search,
+      hash: '/viewer',
     })
   }
 }
@@ -98,7 +113,7 @@ app.whenReady().then(async () => {
   await createWindow()
 
   ipcMain.on('open-pdf-window', (_event, payload) => {
-    createPdfWindow(payload)
+    openOrUpdatePdfWindow(payload)
   })
 
   app.on('activate', () => {

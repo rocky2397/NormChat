@@ -85,7 +85,7 @@ export default function ChatPanel({ projectId, onOpenSource, disabled = false })
                     <SourceCard
                       key={`${source.document_id}-${source.page_number}-${sourceIndex}`}
                       source={source}
-                      onOpen={onOpenSource}
+                      onOpen={() => onOpenSource(message.sources, sourceIndex)}
                     />
                   ))}
                 </div>
