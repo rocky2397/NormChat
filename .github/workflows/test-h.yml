@@ -1,6 +1,0 @@
-name: Test Hello
-on:
-  workflow_dispatch: {}
-jobs:
-  hello:
-    uses: rocky2397/claude-automation/.github/workflows/reusable-hello.yml@main
