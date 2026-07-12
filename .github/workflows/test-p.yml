@@ -1,0 +1,13 @@
+name: Test Prioritizer
+on:
+  workflow_dispatch: {}
+jobs:
+  prioritize:
+    uses: rocky2397/claude-automation/.github/workflows/reusable-prioritizer.yml@main
+    with:
+      project_number: ${{ fromJSON(vars.PROJECT_NUMBER) }}
+      project_owner: rocky2397
+      owner_type: user
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}

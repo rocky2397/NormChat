@@ -1,0 +1,8 @@
+name: Test Worker
+on:
+  workflow_dispatch: {}
+jobs:
+  work:
+    uses: rocky2397/claude-automation/.github/workflows/reusable-worker.yml@main
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
