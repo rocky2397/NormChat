@@ -8,6 +8,23 @@ _CACHE_DIR = Path(tempfile.gettempdir()) / "normchat_highlights"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _shrink_from_end(text: str, min_len: int = 20) -> list[str]:
+    """Progressively drops trailing words. Handles a real failure mode seen
+    in testing: an otherwise-good candidate whose tail hits an unmapped
+    symbol-font glyph (e.g. a Greek letter that extracted as a stray
+    control character) never matches as a whole, even though the clean
+    part of it is genuinely present on the page.
+    """
+    words = text.split(" ")
+    variants = []
+    for cut in range(len(words) - 1, 0, -1):
+        candidate = " ".join(words[:cut])
+        if len(candidate) < min_len:
+            break
+        variants.append(candidate)
+    return variants
+
+
 def _search_snippets(text: str, max_len: int = 80) -> list[str]:
     """Candidate strings to search for, most-specific first.
 
@@ -21,10 +38,12 @@ def _search_snippets(text: str, max_len: int = 80) -> list[str]:
     if len(normalized) > max_len:
         candidates.append(normalized[:max_len])
     candidates.append(normalized)
+    candidates.extend(_shrink_from_end(normalized))
     for line in text.split("\n"):
         line = line.strip()
         if len(line) > 15:
             candidates.append(line[:max_len])
+            candidates.extend(_shrink_from_end(line))
     return candidates
 
 
