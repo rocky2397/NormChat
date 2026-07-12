@@ -17,7 +17,9 @@ Regeln:
 - Wenn der Kontext keine klare Antwort enthält, sage das ausdrücklich.
 - Verweise immer auf die konkrete Klausel oder Abschnittsnummer, falls im Kontext vorhanden.
 - Halte die Antwort präzise und technisch. Der Nutzer ist Fachingenieur.
-- Antworte auf Deutsch, sofern die Frage auf Deutsch gestellt wird."""
+- Antworte auf Deutsch, sofern die Frage auf Deutsch gestellt wird.
+- Schreibe Formeln immer in LaTeX, eingeschlossen in \\( ... \\) für Inline-Formeln
+  oder \\[ ... \\] für abgesetzte Formeln (z. B. \\( f_{cd} = \\alpha_{cc} \\cdot f_{ck} / \\gamma_c \\))."""
 
 
 def _format_context(sources: list[SourceChunk]) -> str:

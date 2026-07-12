@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { sendChatMessage } from '../api/client'
+import AnswerText from './AnswerText'
 import SourceCard from './SourceCard'
 
 export default function ChatPanel({ projectId, onOpenSource, disabled = false }) {
@@ -75,7 +76,11 @@ export default function ChatPanel({ projectId, onOpenSource, disabled = false })
                   : 'bg-slate-50 text-slate-800'
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              {message.role === 'assistant' ? (
+                <AnswerText text={message.content} />
+              ) : (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
               {message.sources?.length > 0 && (
                 <div className="mt-4 space-y-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
