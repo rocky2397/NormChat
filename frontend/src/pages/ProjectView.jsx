@@ -9,7 +9,6 @@ import {
 } from '../api/client'
 import ChatPanel from '../components/ChatPanel'
 import DocumentUpload from '../components/DocumentUpload'
-import PDFViewer from '../components/PDFViewer'
 import ProjectSidebar from '../components/ProjectSidebar'
 
 export default function ProjectView() {
@@ -18,12 +17,6 @@ export default function ProjectView() {
   const [projects, setProjects] = useState([])
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
-  const [viewerState, setViewerState] = useState({
-    documentId: null,
-    filename: '',
-    pageNumber: 1,
-    highlightText: '',
-  })
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -53,24 +46,19 @@ export default function ProjectView() {
   async function handleDeleteDocument(documentId) {
     if (!window.confirm('Dokument wirklich entfernen?')) return
     await deleteDocument(documentId)
-    if (viewerState.documentId === documentId) {
-      setViewerState({
-        documentId: null,
-        filename: '',
-        pageNumber: 1,
-        highlightText: '',
-      })
-    }
     await refresh()
   }
 
   function handleOpenSource(source) {
-    setViewerState({
-      documentId: source.document_id,
-      filename: source.filename,
-      pageNumber: source.page_number,
-      highlightText: source.chunk_text,
-    })
+    const { document_id: documentId, page_number: pageNumber, chunk_text: highlightText, filename } = source
+    if (window.electronAPI) {
+      window.electronAPI.openPdfWindow(documentId, pageNumber, highlightText, filename)
+      return
+    }
+    // Fallback outside Electron (e.g. plain browser during dev): a normal
+    // browser popup pointed at the same standalone viewer route.
+    const search = new URLSearchParams({ page: String(pageNumber), text: highlightText, filename }).toString()
+    window.open(`/documents/${documentId}/viewer?${search}`, '_blank', 'width=1000,height=1100')
   }
 
   if (loading && !project) {
@@ -83,7 +71,7 @@ export default function ProjectView() {
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 lg:p-6">
-      <div className="mx-auto grid h-[calc(100vh-2rem)] max-w-[1600px] gap-4 lg:grid-cols-[280px_1fr] xl:grid-cols-[280px_1.1fr_1fr]">
+      <div className="mx-auto grid h-[calc(100vh-2rem)] max-w-[1000px] gap-4 lg:grid-cols-[280px_1fr]">
         <ProjectSidebar
           projects={projects}
           currentProjectId={projectId}
@@ -109,15 +97,6 @@ export default function ProjectView() {
               disabled={!documents.length}
             />
           </div>
-        </div>
-
-        <div className="hidden min-h-0 xl:block">
-          <PDFViewer
-            documentId={viewerState.documentId}
-            filename={viewerState.filename}
-            pageNumber={viewerState.pageNumber}
-            highlightText={viewerState.highlightText}
-          />
         </div>
       </div>
     </div>

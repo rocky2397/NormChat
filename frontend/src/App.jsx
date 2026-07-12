@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import PDFViewerPage from './pages/PDFViewerPage'
 import ProjectList from './pages/ProjectList'
 import ProjectView from './pages/ProjectView'
 
@@ -8,6 +9,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<ProjectList />} />
         <Route path="/projects/:projectId" element={<ProjectView />} />
+        <Route path="/documents/:documentId/viewer" element={<PDFViewerPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
@@ -14,6 +14,7 @@ const VENV_PYTHON = path.join(os.homedir(), '.venvs/normchat/bin/python3')
 const BACKEND_DIR = path.resolve(__dirname, '../../backend')
 const BACKEND_PORT = 8000
 const FRONTEND_DEV_URL = 'http://localhost:5173'
+const PRELOAD_PATH = path.join(__dirname, 'preload.cjs')
 
 let backendProcess = null
 let mainWindow = null
@@ -45,12 +46,10 @@ async function waitForBackend(timeoutMs = 20000) {
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1680,
+    width: 1200,
     height: 1000,
     webPreferences: {
-      // Required for Chromium's built-in PDF viewer, which the source
-      // citation panel embeds directly via an <iframe>.
-      plugins: true,
+      preload: PRELOAD_PATH,
     },
   })
 
@@ -61,6 +60,35 @@ async function createWindow() {
   }
 }
 
+async function createPdfWindow({ documentId, pageNumber, highlightText, filename }) {
+  const pdfWindow = new BrowserWindow({
+    width: 1000,
+    height: 1100,
+    webPreferences: {
+      // Required for Chromium's built-in PDF viewer, which the standalone
+      // viewer page embeds directly via an <iframe>.
+      plugins: true,
+    },
+  })
+
+  const search = new URLSearchParams({
+    page: String(pageNumber),
+    text: highlightText || '',
+    filename: filename || '',
+  }).toString()
+
+  if (isDev) {
+    await pdfWindow.loadURL(`${FRONTEND_DEV_URL}/documents/${documentId}/viewer?${search}`)
+  } else {
+    // Production packaging (static build + routing) hasn't been set up
+    // yet — this path is unverified until that lands.
+    await pdfWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
+      hash: `/documents/${documentId}/viewer`,
+      search,
+    })
+  }
+}
+
 app.whenReady().then(async () => {
   startBackend()
   const backendReady = await waitForBackend()
@@ -68,6 +96,10 @@ app.whenReady().then(async () => {
     console.error('Backend did not become ready in time; opening window anyway.')
   }
   await createWindow()
+
+  ipcMain.on('open-pdf-window', (_event, payload) => {
+    createPdfWindow(payload)
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

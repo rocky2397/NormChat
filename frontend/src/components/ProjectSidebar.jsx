@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 export default function ProjectSidebar({
@@ -6,6 +7,7 @@ export default function ProjectSidebar({
   documents,
   onDeleteDocument,
 }) {
+  const [documentsExpanded, setDocumentsExpanded] = useState(false)
   return (
     <aside className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-200 px-4 py-4">
@@ -51,32 +53,46 @@ export default function ProjectSidebar({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <h3 className="mb-3 text-sm font-semibold text-slate-800">Dokumente</h3>
-        {!documents.length ? (
-          <p className="text-sm text-slate-500">Noch keine PDFs hochgeladen.</p>
-        ) : (
-          <ul className="space-y-2">
-            {documents.map((document) => (
-              <li
-                key={document.id}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-              >
-                <p className="font-medium text-slate-800">{document.filename}</p>
-                <p className="text-xs text-slate-500">
-                  {document.norm_reference || 'Norm'} · {document.page_count} Seiten ·{' '}
-                  {document.chunk_count} Abschnitte
-                </p>
-                <button
-                  type="button"
-                  onClick={() => onDeleteDocument(document.id)}
-                  className="mt-2 text-xs font-medium text-red-600 hover:text-red-700"
-                >
-                  Entfernen
-                </button>
-              </li>
-            ))}
-          </ul>
+      <div
+        className="relative border-b border-slate-200"
+        onMouseEnter={() => setDocumentsExpanded(true)}
+        onMouseLeave={() => setDocumentsExpanded(false)}
+      >
+        <div className="flex items-center justify-between px-4 py-4">
+          <h3 className="text-sm font-semibold text-slate-800">Dokumente</h3>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            {documents.length}
+          </span>
+        </div>
+
+        {documentsExpanded && (
+          <div className="absolute inset-x-0 top-full z-20 max-h-[60vh] overflow-y-auto rounded-b-2xl border-t border-slate-200 bg-white p-4 shadow-lg">
+            {!documents.length ? (
+              <p className="text-sm text-slate-500">Noch keine PDFs hochgeladen.</p>
+            ) : (
+              <ul className="space-y-2">
+                {documents.map((document) => (
+                  <li
+                    key={document.id}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    <p className="font-medium text-slate-800">{document.filename}</p>
+                    <p className="text-xs text-slate-500">
+                      {document.norm_reference || 'Norm'} · {document.page_count} Seiten ·{' '}
+                      {document.chunk_count} Abschnitte
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteDocument(document.id)}
+                      className="mt-2 text-xs font-medium text-red-600 hover:text-red-700"
+                    >
+                      Entfernen
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     </aside>
