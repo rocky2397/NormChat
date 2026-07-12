@@ -98,7 +98,7 @@ export default function PDFViewerPage() {
           documentId={current.document_id}
           filename={current.filename}
           pageNumber={current.page_number}
-          highlightText={current.chunk_text}
+          highlightText={current.highlight_snippet || current.chunk_text}
         />
       </div>
     </div>

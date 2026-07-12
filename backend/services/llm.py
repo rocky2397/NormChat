@@ -1,4 +1,7 @@
+import difflib
+
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 from config import settings
 from models.chat import ChatResponse, SourceChunk
@@ -106,7 +109,98 @@ def generate_answer(question: str, sources: list[SourceChunk]) -> str:
     return response.content.strip()
 
 
+class _SourceExcerpt(BaseModel):
+    source_index: int = Field(description="1-based [Quelle N] number this excerpt belongs to")
+    excerpt: str = Field(
+        description="The exact, verbatim, character-for-character substring copied "
+        "from that source's text that the answer actually relied on — a short "
+        "phrase or single sentence, not a paraphrase and not the whole passage."
+    )
+
+
+class _CitationExcerpts(BaseModel):
+    excerpts: list[_SourceExcerpt] = Field(
+        description="One entry per source that genuinely contributed to the answer. "
+        "Omit sources that were only tangentially retrieved and not actually used."
+    )
+
+
+def extract_citation_excerpts(
+    question: str, answer: str, sources: list[SourceChunk]
+) -> dict[int, str]:
+    """Asks the model which exact excerpt it relied on per source, for precise
+    PDF highlighting. Isolated from generate_answer() on purpose: this is a
+    locate-existing-text hint, not an assertion of fact, so if the model
+    misquotes or this call fails outright, downstream search-on-page simply
+    won't find it and we fall back to the raw chunk_text — it never affects
+    the actual answer shown to the user.
+    """
+    if not sources or not settings.openai_api_key:
+        return {}
+
+    context = _format_context(sources)
+    llm = ChatOpenAI(
+        model=settings.openai_model,
+        openai_api_key=settings.openai_api_key,
+        temperature=0,
+    )
+    structured_llm = llm.with_structured_output(_CitationExcerpts)
+
+    prompt = (
+        f"Frage: {question}\n\n"
+        f"Antwort: {answer}\n\n"
+        f"Kontext (nummerierte Quellen):\n{context}\n\n"
+        "Gib für jede Quelle, die tatsächlich zur obigen Antwort beigetragen hat, "
+        "das exakte, wortwörtliche Zitat aus dem jeweiligen Quellentext zurück, auf "
+        "das sich die Antwort stützt. Das Zitat muss zeichengenau im Quellentext "
+        "vorkommen (keine Paraphrase) und kurz sein (ein Satz oder eine Kernaussage, "
+        "nicht der ganze Abschnitt). Quellen ohne tatsächlichen Beitrag weglassen."
+    )
+
+    try:
+        result = structured_llm.invoke(prompt)
+    except Exception:
+        return {}
+
+    return {e.source_index: e.excerpt for e in result.excerpts}
+
+
+def _sliding_windows(chunk_text: str, max_lines: int = 3) -> list[str]:
+    raw_lines = [line.strip() for line in chunk_text.split("\n") if line.strip()]
+    windows = []
+    for size in range(1, max_lines + 1):
+        for start in range(len(raw_lines) - size + 1):
+            windows.append(" ".join(raw_lines[start : start + size]))
+    return windows
+
+
+def _ground_excerpt(excerpt: str, chunk_text: str, threshold: float = 0.35) -> str | None:
+    """Despite instructions, the model tends to paraphrase/clean up its quoted
+    excerpt rather than copy it character-for-character (confirmed in
+    testing — PyMuPDF's on-page search then finds nothing). This finds the
+    closest REAL span of chunk_text — a window of 1-3 consecutive raw PDF
+    lines, since the target sentence is often split across several by the
+    page's own line wrapping — so what actually gets searched for is
+    guaranteed to be text that exists verbatim in the source.
+    """
+    if not excerpt:
+        return None
+    candidates = _sliding_windows(chunk_text)
+    if not candidates:
+        return None
+    best_score, best_candidate = max(
+        (difflib.SequenceMatcher(None, excerpt, c).ratio(), c) for c in candidates
+    )
+    return best_candidate if best_score >= threshold else None
+
+
 def chat(project_id: str, question: str) -> ChatResponse:
     sources = retrieve_sources(project_id, question)
     answer = generate_answer(question, sources)
+    excerpts = extract_citation_excerpts(question, answer, sources)
+    for i, source in enumerate(sources, start=1):
+        raw_excerpt = excerpts.get(i)
+        source.highlight_snippet = (
+            _ground_excerpt(raw_excerpt, source.chunk_text) if raw_excerpt else None
+        )
     return ChatResponse(answer=answer, sources=sources)

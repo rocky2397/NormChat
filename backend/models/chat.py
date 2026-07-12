@@ -12,6 +12,7 @@ class SourceChunk(BaseModel):
     chunk_text: str
     norm_reference: str | None = None
     edition: str | None = None
+    highlight_snippet: str | None = None
 
 
 class ChatResponse(BaseModel):
