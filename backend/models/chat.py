@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -18,3 +21,23 @@ class SourceChunk(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     sources: list[SourceChunk]
+
+
+class FeedbackRequest(BaseModel):
+    question: str = Field(min_length=1)
+    answer: str = Field(min_length=1)
+    sources: list[SourceChunk] = []
+    rating: Literal["good", "mid", "bad"]
+    comment: str | None = None
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    project_id: str
+    question: str
+    answer: str
+    rating: Literal["good", "mid", "bad"]
+    comment: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

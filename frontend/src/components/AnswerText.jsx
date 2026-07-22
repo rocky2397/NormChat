@@ -1,59 +1,31 @@
-import { InlineMath, BlockMath } from 'react-katex'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 
-// Matches \[...\] (block) and \(...\) (inline) — the delimiters the model
-// actually uses when it emits LaTeX. It doesn't always wrap formulas this
-// way (sometimes it just writes a bare "αcc"), so only text inside a
-// recognized delimiter pair is treated as math; everything else stays
-// plain text rather than guessing.
-const MATH_PATTERN = /\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)/g
+// The model emits LaTeX wrapped in \[...\] (block) and \(...\) (inline),
+// but remark-math only recognizes dollar delimiters — rewrite them before
+// parsing. Bare formulas without any delimiter (e.g. "αcc") stay plain
+// text rather than guessing.
+const BLOCK_MATH_PATTERN = /\\\[([\s\S]+?)\\\]/g
+const INLINE_MATH_PATTERN = /\\\(([\s\S]+?)\\\)/g
 
-function renderFallback(raw) {
-  return <span>{raw}</span>
+function normalizeMathDelimiters(text) {
+  return text
+    .replace(BLOCK_MATH_PATTERN, (_, expr) => `\n$$\n${expr}\n$$\n`)
+    .replace(INLINE_MATH_PATTERN, (_, expr) => `$${expr}$`)
 }
 
 export default function AnswerText({ text }) {
-  // MATH_PATTERN is a shared module-level regex (the `g` flag needs it to
-  // be, to track position across .exec() calls within one run) — reset
-  // defensively in case a previous call was interrupted before reaching
-  // its natural (auto-resetting) null match.
-  MATH_PATTERN.lastIndex = 0
-  const parts = []
-  let lastIndex = 0
-  let match
-  let key = 0
-
-  while ((match = MATH_PATTERN.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(<span key={key++}>{text.slice(lastIndex, match.index)}</span>)
-    }
-
-    const [full, blockMath, inlineMath] = match
-    if (blockMath !== undefined) {
-      parts.push(
-        <BlockMath
-          key={key++}
-          math={blockMath}
-          errorColor="#cc0000"
-          renderError={() => renderFallback(full)}
-        />,
-      )
-    } else {
-      parts.push(
-        <InlineMath
-          key={key++}
-          math={inlineMath}
-          errorColor="#cc0000"
-          renderError={() => renderFallback(full)}
-        />,
-      )
-    }
-    lastIndex = MATH_PATTERN.lastIndex
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(<span key={key++}>{text.slice(lastIndex)}</span>)
-  }
-
-  return <p className="whitespace-pre-wrap">{parts}</p>
+  return (
+    <div className="prose prose-sm prose-slate max-w-none">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { errorColor: '#cc0000' }]]}
+      >
+        {normalizeMathDelimiters(text)}
+      </ReactMarkdown>
+    </div>
+  )
 }

@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     retrieval_candidate_pool: int = 100
     reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
+    auth_username: str = ""
+    auth_password: str = ""
+    session_secret: str = ""
+    session_cookie_secure: bool = False
+
 
 settings = Settings()
 settings.storage_dir.mkdir(parents=True, exist_ok=True)

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { sendChatMessage } from '../api/client'
 import AnswerText from './AnswerText'
+import FeedbackWidget from './FeedbackWidget'
 import SourceCard from './SourceCard'
 
 export default function ChatPanel({ projectId, onOpenSource, disabled = false }) {
@@ -38,6 +39,7 @@ export default function ChatPanel({ projectId, onOpenSource, disabled = false })
           role: 'assistant',
           content: response.answer,
           sources: response.sources,
+          question: trimmed,
         },
       ])
     } catch (err) {
@@ -94,6 +96,14 @@ export default function ChatPanel({ projectId, onOpenSource, disabled = false })
                     />
                   ))}
                 </div>
+              )}
+              {message.role === 'assistant' && (
+                <FeedbackWidget
+                  projectId={projectId}
+                  question={message.question}
+                  answer={message.content}
+                  sources={message.sources || []}
+                />
               )}
             </div>
           </div>

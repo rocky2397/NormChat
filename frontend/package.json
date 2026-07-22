@@ -5,19 +5,23 @@
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -s first \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:web": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview",
-    "electron:dev": "concurrently -k -s first \"vite\" \"wait-on http://localhost:5173 && electron .\""
+    "preview": "vite preview"
   },
   "dependencies": {
+    "@tailwindcss/typography": "^0.5.20",
     "axios": "^1.18.1",
     "katex": "^0.17.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-katex": "^3.1.0",
-    "react-router-dom": "^7.18.1"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",

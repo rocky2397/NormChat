@@ -1,4 +1,5 @@
 import difflib
+import re
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -16,6 +17,10 @@ Regeln:
 - Verwende kein Allgemeinwissen. Nur der Kontext zählt.
 - Wenn der Kontext keine klare Antwort enthält, sage das ausdrücklich.
 - Verweise immer auf die konkrete Klausel oder Abschnittsnummer, falls im Kontext vorhanden.
+- Wenn du dich auf eine Quelle beziehst, nenne die Norm-Bezeichnung oder den
+  Dokumentnamen (z. B. "DIN 4102-2"), niemals die interne Markierung
+  "[Quelle N]" aus dem Kontext — diese ist nur zur internen Zuordnung gedacht
+  und wird dem Nutzer nicht angezeigt.
 - Halte die Antwort präzise und technisch. Der Nutzer ist Fachingenieur.
 - Antworte auf Deutsch, sofern die Frage auf Deutsch gestellt wird.
 - Schreibe Formeln immer in LaTeX, eingeschlossen in \\( ... \\) für Inline-Formeln
@@ -32,6 +37,26 @@ def _format_context(sources: list[SourceChunk]) -> str:
             f"[Quelle {i}] {ref}, Seite {source.page_number}:\n{source.chunk_text}"
         )
     return "\n\n".join(blocks)
+
+
+_CITATION_LABEL_PATTERN = re.compile(r"\[Quelle (\d+)\]")
+
+
+def _replace_citation_labels(answer: str, sources: list[SourceChunk]) -> str:
+    """The model is instructed to cite documents by name, but LLM output is
+    non-deterministic — this is a deterministic backstop that rewrites any
+    "[Quelle N]" label it emits anyway into the matching document's name, so
+    the internal indexing scheme never leaks into the user-visible answer.
+    """
+
+    def repl(match: re.Match) -> str:
+        index = int(match.group(1))
+        if 1 <= index <= len(sources):
+            source = sources[index - 1]
+            return source.norm_reference or source.filename
+        return match.group(0)
+
+    return _CITATION_LABEL_PATTERN.sub(repl, answer)
 
 
 def retrieve_sources(project_id: str, question: str) -> list[SourceChunk]:
@@ -205,4 +230,5 @@ def chat(project_id: str, question: str) -> ChatResponse:
         source.highlight_snippet = (
             _ground_excerpt(raw_excerpt, source.chunk_text) if raw_excerpt else None
         )
+    answer = _replace_citation_labels(answer, sources)
     return ChatResponse(answer=answer, sources=sources)

@@ -24,6 +24,7 @@ def get_db():
 
 def init_db():
     from models.document import Document  # noqa: F401
+    from models.feedback import ChatFeedback  # noqa: F401
     from models.project import Project  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

@@ -2,8 +2,35 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
+  withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 })
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status
+    const url = error.config?.url || ''
+    if (status === 401 && !url.startsWith('/auth/')) {
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  },
+)
+
+export async function login(username, password) {
+  const { data } = await api.post('/auth/login', { username, password })
+  return data
+}
+
+export async function logout() {
+  await api.post('/auth/logout')
+}
+
+export async function getAuthStatus() {
+  const { data } = await api.get('/auth/me')
+  return data
+}
 
 export async function listProjects() {
   const { data } = await api.get('/projects')
@@ -58,6 +85,11 @@ export function documentHighlightedUrl(documentId, pageNumber, highlightText) {
 
 export async function sendChatMessage(projectId, question) {
   const { data } = await api.post(`/projects/${projectId}/chat`, { question })
+  return data
+}
+
+export async function submitFeedback(projectId, payload) {
+  const { data } = await api.post(`/projects/${projectId}/feedback`, payload)
   return data
 }
 
