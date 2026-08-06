@@ -23,6 +23,36 @@ def _get_cross_encoder() -> CrossEncoder:
     return CrossEncoder(settings.reranker_model)
 
 
+# German compounding defeats exact-token matching: an engineer asks about
+# "Querkraftbemessung" and the clause is headed "Querkraft", which share no
+# token at all. Measured on the reference questions — the EN 1992-1-1 §6.2
+# chunks ranked 281st for the question as written and 5th for "Querkraft"
+# (eval/runs/2026-08-06-clause-lookup.md).
+MIN_COMPOUND_LENGTH = 12
+MIN_PART_LENGTH = 5
+MAX_PARTS_PER_TOKEN = 3
+
+
+def _expand_compounds(tokens: list[str], vocabulary: set[str]) -> list[str]:
+    """Adds the corpus words that a long query token is built from.
+
+    The corpus supplies the vocabulary rather than a dictionary or a
+    stemmer, so the parts are guaranteed to be terms the documents actually
+    use; longest first, since "querkraft" carries more meaning than "kraft".
+    """
+    expanded = list(tokens)
+    for token in tokens:
+        if len(token) < MIN_COMPOUND_LENGTH:
+            continue
+        parts = sorted(
+            (w for w in vocabulary if MIN_PART_LENGTH <= len(w) < len(token) and w in token),
+            key=len,
+            reverse=True,
+        )
+        expanded.extend(parts[:MAX_PARTS_PER_TOKEN])
+    return expanded
+
+
 def bm25_rank_ids(query: str, ids: list[str], documents: list[str]) -> list[str]:
     """Ranks chunk ids by keyword (BM25) match against the query, best first.
 
@@ -31,8 +61,10 @@ def bm25_rank_ids(query: str, ids: list[str], documents: list[str]) -> list[str]
     """
     if not documents:
         return []
-    bm25 = BM25Okapi([_tokenize(doc) for doc in documents])
-    scores = bm25.get_scores(_tokenize(query))
+    tokenized = [_tokenize(doc) for doc in documents]
+    bm25 = BM25Okapi(tokenized)
+    vocabulary = {word for doc in tokenized for word in doc}
+    scores = bm25.get_scores(_expand_compounds(_tokenize(query), vocabulary))
     order = sorted(range(len(documents)), key=lambda i: scores[i], reverse=True)
     return [ids[i] for i in order]
 

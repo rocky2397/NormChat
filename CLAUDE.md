@@ -17,3 +17,5 @@
 - The app's core promise is citation accuracy: answers must point to
   the exact source passage in the uploaded PDF. Never change retrieval,
   chunking, or citation logic as a side effect of an unrelated ticket.
+  When a ticket does change them deliberately, check the result against
+  the reference questions in `eval/questions.md`.
