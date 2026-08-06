@@ -15,7 +15,12 @@ export default function PDFViewerPage() {
   // available, otherwise postMessage from the opener window.
   useEffect(() => {
     if (window.electronAPI) {
-      return window.electronAPI.onUpdateSources(applyUpdate)
+      const unsubscribe = window.electronAPI.onUpdateSources(applyUpdate)
+      // Announce only once the listener exists. This component mounts well
+      // after the page loads, because the auth gate holds it back until
+      // /api/auth/me returns — so anything pushed at load time was missed.
+      window.electronAPI.notifyViewerReady()
+      return unsubscribe
     }
 
     function handleMessage(event) {

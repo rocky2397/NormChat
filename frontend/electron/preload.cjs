@@ -9,4 +9,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update-sources', listener)
     return () => ipcRenderer.removeListener('update-sources', listener)
   },
+  // Call only after onUpdateSources, so the reply cannot arrive before the
+  // listener that is meant to receive it.
+  notifyViewerReady: () => {
+    ipcRenderer.send('viewer-ready')
+  },
 })
