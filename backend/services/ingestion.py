@@ -3,8 +3,14 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from models.document import Document
-from services.chunking import chunk_pages, extract_pages, strip_boilerplate
+from services.chunking import (
+    chunk_pages,
+    extract_pages,
+    strip_boilerplate,
+    strip_front_matter,
+)
 from services.embeddings import get_embeddings
+from services.norm_identity import parse_identity
 from services.storage import (
     extract_norm_reference,
     get_collection,
@@ -33,8 +39,20 @@ def ingest_document(
 
     pages = extract_pages(str(dest_path))
     first_page_text = pages[0].text if pages else ""
-    norm_reference = extract_norm_reference(safe_name, first_page_text)
-    cleaned_pages, edition = strip_boilerplate(pages, norm_reference)
+    identity = parse_identity(safe_name, first_page_text)
+    norm_reference = (
+        identity.reference
+        if identity
+        else extract_norm_reference(safe_name, first_page_text)
+    )
+    # Boilerplate detection first: it needs every page to spot the running
+    # header, and blanking pages beforehand would weaken that signal.
+    cleaned_pages, header_edition = strip_boilerplate(pages, norm_reference)
+    cleaned_pages = strip_front_matter(cleaned_pages)
+    # The cover declares the edition outright ("Ausgabe: 2015-02-15"); the
+    # header-derived one is inferred from whatever line repeats across pages,
+    # so it only stands in for documents no profile recognises.
+    edition = (identity.edition if identity else None) or header_edition
     chunks = chunk_pages(cleaned_pages, norm_reference)
 
     document = Document(

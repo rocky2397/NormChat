@@ -5,6 +5,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from config import settings
+from services.norm_identity import parse_identity
 
 
 def get_project_storage_dir(project_id: str) -> Path:
@@ -42,6 +43,14 @@ def init_project_storage(project_id: str) -> None:
 
 
 def extract_norm_reference(filename: str, first_page_text: str = "") -> str | None:
+    # A recognised publisher states its own identity on the cover, which is
+    # more precise than pattern-matching a name out of arbitrary text — it
+    # distinguishes an amendment (EN 1990/A1) from the norm it amends.
+    # Everything else keeps the original behaviour below.
+    identity = parse_identity(filename, first_page_text)
+    if identity:
+        return identity.reference
+
     patterns = [
         r"(DIN\s*EN?\s*\d+(?:-\d+)*)",
         r"(ÖNORM\s*[A-Z]?\s*\d+(?:-\d+)*)",

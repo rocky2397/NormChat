@@ -4,6 +4,10 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 
+from services.symbol_text import ADOBE_SYMBOL
+
+_SYMBOL_CHARS = frozenset(ADOBE_SYMBOL.values())
+
 _CACHE_DIR = Path(tempfile.gettempdir()) / "normchat_highlights"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -25,6 +29,32 @@ def _shrink_from_end(text: str, min_len: int = 20) -> list[str]:
     return variants
 
 
+def _split_at_symbols(text: str, min_len: int = 20) -> list[str]:
+    """Splits at recovered Symbol-font characters, longest fragment first.
+
+    Ingestion resolves Greek letters and math operators that the PDF's own
+    text layer still stores as unmapped control characters (see
+    services/symbol_text.py). A cited passage therefore reads "αcc fck / γC"
+    while the page itself reads "\\x06cc fck / \\x03C", and searching for the
+    former finds nothing. The text between those characters is unaffected and
+    still matches verbatim, so a formula-bearing passage stays locatable.
+    """
+    fragments = []
+    current = []
+    for char in text:
+        if char in _SYMBOL_CHARS:
+            fragments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    fragments.append("".join(current))
+    return sorted(
+        (f.strip() for f in fragments if len(f.strip()) >= min_len),
+        key=len,
+        reverse=True,
+    )
+
+
 def _search_snippets(text: str, max_len: int = 80) -> list[str]:
     """Candidate strings to search for, most-specific first.
 
@@ -44,6 +74,9 @@ def _search_snippets(text: str, max_len: int = 80) -> list[str]:
         if len(line) > 15:
             candidates.append(line[:max_len])
             candidates.extend(_shrink_from_end(line))
+    # Last resort: every candidate above fails outright if the passage
+    # contains a recovered symbol, so retry on the parts around it.
+    candidates.extend(_split_at_symbols(normalized))
     return candidates
 
 

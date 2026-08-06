@@ -7,6 +7,7 @@ import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import settings
+from services.symbol_text import build_symbol_maps, extract_page_text
 
 _DIGIT_RUN = re.compile(r"\d+")
 BOILERPLATE_FREQUENCY_THRESHOLD = 0.6
@@ -36,8 +37,11 @@ class TextChunk:
 def extract_pages(pdf_path: str) -> list[PageText]:
     pages: list[PageText] = []
     with fitz.open(pdf_path) as pdf:
+        # Built once per document: the Symbol subsets are shared across pages,
+        # and resolving them page by page would re-parse the same font objects.
+        symbol_maps = build_symbol_maps(pdf)
         for index, page in enumerate(pdf, start=1):
-            text = page.get_text()
+            text = extract_page_text(page, symbol_maps)
             pages.append(PageText(page_number=index, text=text.strip()))
     return pages
 
@@ -117,6 +121,48 @@ def strip_boilerplate(
         ]
         cleaned_pages.append(PageText(page_number=page.page_number, text="\n".join(kept).strip()))
     return cleaned_pages, edition
+
+
+# A contents line ends in dot leaders and a page number; a cover carries
+# publisher boilerplate.
+_TOC_LEADER = re.compile(r"\.{4,}\s*\d+\s*$")
+_COVER_MARKER = re.compile(r"Medieninhaber|Copyright ©|DEUTSCHE NORM|Alle Rechte vorbehalten")
+TOC_LINE_SHARE = 0.3
+
+
+def _is_contents_page(text: str) -> bool:
+    lines = [line for line in text.split("\n") if line.strip()]
+    if len(lines) < 5:
+        return False
+    leaders = sum(1 for line in lines if _TOC_LEADER.search(line))
+    return leaders / len(lines) >= TOC_LINE_SHARE
+
+
+def strip_front_matter(pages: list[PageText]) -> list[PageText]:
+    """Blanks cover and table-of-contents pages before chunking.
+
+    Measured motivation (eval/runs/2026-08-06-baseline.md): a contents page
+    repeats every clause number in the document and a cover is publisher
+    boilerplate, so both match a question about national supplements without
+    carrying any rule of their own. They outranked the operative clauses.
+
+    Forewords are deliberately **kept**, having been tried and reverted. They
+    look like the same kind of noise, but they are where a document states
+    its relationship to others — "Die ÖNORM EN 1995-1-2 und ÖNORM B 1995-1-2
+    sind gemeinsam anzuwenden". Removing them made the model substitute an
+    invented explanation ("die konsolidierte Fassung von …") for a question
+    about which norms apply.
+
+    Pages are blanked rather than removed so page numbers, which every
+    citation depends on, keep pointing at the same physical page.
+    """
+    cleaned: list[PageText] = []
+    for page in pages:
+        text = page.text
+        if (page.page_number == 1 and _COVER_MARKER.search(text)) or _is_contents_page(text):
+            text = ""
+        cleaned.append(PageText(page_number=page.page_number, text=text))
+    return cleaned
 
 
 def _split_on_clauses(
