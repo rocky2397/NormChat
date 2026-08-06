@@ -19,6 +19,7 @@ const PRELOAD_PATH = path.join(__dirname, 'preload.cjs')
 let backendProcess = null
 let mainWindow = null
 let pdfWindow = null
+let pdfPayload = null
 
 function startBackend() {
   backendProcess = spawn(
@@ -62,6 +63,12 @@ async function createWindow() {
 }
 
 async function openOrUpdatePdfWindow(payload) {
+  // Retained so a viewer that announces itself late — or reloads — can be
+  // served the current citations without the user clicking again. Citation
+  // text for a full answer runs past the ~16KB header limit Node enforces on
+  // a query string (a 431 in testing), so it travels over IPC, not the URL.
+  pdfPayload = payload
+
   // Reuse one window across citation clicks — pushing new data over IPC —
   // rather than spawning a new window per click, which was the whole point
   // of the stepper: one place to page through all of an answer's sources.
@@ -85,13 +92,12 @@ async function openOrUpdatePdfWindow(payload) {
     pdfWindow = null
   })
 
-  // Citation text for a full answer's sources easily runs past the ~16KB
-  // header-size limit Node's HTTP server enforces if stuffed into a query
-  // string (hit a 431 in testing) — push the payload over IPC once the
-  // page has actually loaded and is listening, instead.
-  pdfWindow.webContents.once('did-finish-load', () => {
-    pdfWindow.webContents.send('update-sources', payload)
-  })
+  // The payload is not pushed on 'did-finish-load'. That fires when the page
+  // loads, but the viewer route sits behind the auth gate, so React has not
+  // mounted the component that listens for it yet — the message was
+  // delivered to nobody and the window sat on "Quellen werden geladen…"
+  // forever. The renderer now announces itself instead (see 'viewer-ready'),
+  // which removes the race rather than narrowing it.
 
   if (isDev) {
     await pdfWindow.loadURL(`${FRONTEND_DEV_URL}/viewer`)
@@ -114,6 +120,15 @@ app.whenReady().then(async () => {
 
   ipcMain.on('open-pdf-window', (_event, payload) => {
     openOrUpdatePdfWindow(payload)
+  })
+
+  // The viewer asks for its citations once it is actually listening, which
+  // is the only moment the main process can know that. Answering a request
+  // cannot lose the message the way pushing on page load did.
+  ipcMain.on('viewer-ready', (event) => {
+    if (pdfPayload) {
+      event.sender.send('update-sources', pdfPayload)
+    }
   })
 
   app.on('activate', () => {
