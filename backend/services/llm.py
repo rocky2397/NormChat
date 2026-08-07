@@ -253,13 +253,20 @@ def retrieve_sources(
         rankings.append(vector_results["ids"][0])
         rankings.append(bm25_rank_ids(query, all_ids, all_chunks["documents"])[:pool_size])
 
+    # The trace reports the dense and lexical stages for the question itself,
+    # which are the first two rankings appended above. Expansion probes are
+    # auxiliary inputs to the fusion, so folding them in here would change
+    # what a "dense rank" means depending on a feature flag and make probe
+    # runs incomparable across the two arms.
+    question_vector_ids, question_bm25_ids = rankings[0], rankings[1]
+
     fused_ids = reciprocal_rank_fusion(*rankings)[:pool_size]
     fused_docs = [id_to_doc[cid] for cid in fused_ids]
     final_ids = rerank_ids(question, fused_ids, fused_docs, settings.top_k_chunks)
 
     if trace is not None:
-        trace.vector_ids = list(vector_ids)
-        trace.bm25_ids = list(bm25_ids)
+        trace.vector_ids = list(question_vector_ids)
+        trace.bm25_ids = list(question_bm25_ids)
         trace.fused_ids = list(fused_ids)
         # Snapshot before the clause-lookup pass mutates final_ids.
         trace.reranked_ids = list(final_ids)
