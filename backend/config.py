@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     retrieval_candidate_pool: int = 100
     reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 
+    # Pre-retrieval sub-query expansion (services/query_expansion.py). Off by
+    # default; adds one LLM call to the critical path, so it uses the cheapest
+    # adequate model rather than openai_model.
+    query_expansion_enabled: bool = False
+    query_expansion_model: str = "gpt-4o-mini"
+    query_expansion_max_queries: int = 4
+    query_expansion_timeout_seconds: float = 10.0
+
     auth_username: str = ""
     auth_password: str = ""
     session_secret: str = ""
