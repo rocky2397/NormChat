@@ -14,6 +14,7 @@ from eval.retrieval_probe import (
     GoldResult,
     ProbeQuestion,
     QuestionResult,
+    _parse_gold_block,
     chunk_matches_gold,
     first_gold_rank,
     parse_questions,
@@ -77,9 +78,10 @@ class TestParseQuestions:
         questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8"))
         by_number = {q.number: q for q in questions}
         assert set(by_number) == {1, 2, 3, 4, 5}
-        # Q1/Q2 are TBD until engineering sign-off; Q3–Q5 are stated in the
-        # run notes and filled in.
-        assert by_number[1].gold == () and by_number[2].gold == ()
+        # Every question now carries gold. Q1 is document-level (`*`),
+        # because it asks which norms apply rather than which clause does.
+        assert all(by_number[n].gold for n in (1, 2, 3, 4, 5))
+        assert all(label.pages is None for label in by_number[1].gold)
         for n in (3, 4, 5):
             assert by_number[n].gold, f"Q{n} should carry gold labels"
             assert by_number[n].text.startswith(("Erläutere", "Führe", "Muss"))
@@ -172,3 +174,28 @@ class TestRecallAndReport:
         assert "| dense | 1/2 (0.50) | 1/2 (0.50) |" in report
         assert "| fused | 1/2 (0.50) | 2/2 (1.00) |" in report
         assert "Q1, Q2" in report
+
+
+class TestDocumentLevelGold:
+    def test_star_means_any_page(self):
+        # Q1 asks which norms apply, so the expectation is that the document
+        # reaches the context at all — pinning it to a page would measure
+        # something the question never asks.
+        (label,) = _parse_gold_block("```gold\nÖNORM EN 1995-1-2: *\n```")
+        assert label.pages is None
+        assert chunk_matches_gold(
+            {"norm_reference": "ÖNORM EN 1995-1-2", "page_number": 77}, label
+        )
+
+    def test_star_still_requires_the_right_document(self):
+        (label,) = _parse_gold_block("```gold\nÖNORM B 1995-1-2: *\n```")
+        assert not chunk_matches_gold(
+            {"norm_reference": "ÖNORM EN 1995-1-2", "page_number": 7}, label
+        )
+
+    def test_page_labels_are_unaffected(self):
+        (label,) = _parse_gold_block("```gold\nÖNORM B 1995-1-2: 7\n```")
+        assert label.pages == frozenset({7})
+        assert not chunk_matches_gold(
+            {"norm_reference": "ÖNORM B 1995-1-2", "page_number": 8}, label
+        )
