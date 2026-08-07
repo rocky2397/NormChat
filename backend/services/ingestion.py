@@ -1,7 +1,9 @@
+import logging
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from config import settings
 from models.document import Document
 from services.chunking import (
     chunk_pages,
@@ -11,11 +13,14 @@ from services.chunking import (
 )
 from services.embeddings import get_embeddings
 from services.norm_identity import parse_identity
+from services.reference_resolution import enrich_project_references
 from services.storage import (
     extract_norm_reference,
     get_collection,
     get_project_documents_dir,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def ingest_document(
@@ -94,6 +99,17 @@ def ingest_document(
 
     db.commit()
     db.refresh(document)
+
+    # A national annex may arrive before the norm it modifies, so reference
+    # enrichment runs as a project-level pass after every successful
+    # ingestion rather than once inside it. The document is committed either
+    # way: enrichment only changes what is searchable, so a failure here
+    # must not fail an otherwise completed upload.
+    if settings.reference_enrichment_enabled:
+        try:
+            enrich_project_references(project_id)
+        except Exception:
+            logger.exception("Reference enrichment failed for project %s", project_id)
     return document
 
 

@@ -287,7 +287,13 @@ def retrieve_sources(
                 document_id=meta["document_id"],
                 filename=meta["source_filename"],
                 page_number=int(meta["page_number"]),
-                chunk_text=id_to_doc[cid],
+                # The indexed text may carry appended parent-clause headings
+                # (services/reference_resolution.py); everything user-facing —
+                # display, LLM context, excerpt grounding — must see only text
+                # that exists on the cited page, so the original is read back
+                # from raw_text. Collections indexed before enrichment existed
+                # carry no raw_text; their stored text is already original.
+                chunk_text=meta.get("raw_text") or id_to_doc[cid],
                 norm_reference=meta.get("norm_reference") or None,
                 edition=meta.get("edition") or None,
             )

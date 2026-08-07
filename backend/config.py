@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     chunk_overlap: int = 64
     retrieval_candidate_pool: int = 100
     reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+    # Index-time reference enrichment for national-annex delta clauses
+    # (services/reference_resolution.py). Off by default so the retrieval
+    # probe can measure both arms against the same corpus.
+    reference_enrichment_enabled: bool = False
 
     auth_username: str = ""
     auth_password: str = ""
