@@ -22,3 +22,20 @@ class TestCompoundExpansion:
 
     def test_original_tokens_are_always_kept(self):
         assert "querkraftbemessung" in _expand_compounds(["querkraftbemessung"], {"querkraft"})
+
+
+class TestDeterminism:
+    def test_equal_length_candidates_are_ordered_alphabetically(self):
+        # Sorting on length alone left ties in set iteration order, which
+        # Python randomises per process: which parts survived the cut changed
+        # between runs, so the same question returned different sources and
+        # probe measurements moved without any change being made.
+        vocabulary = {"querkraft", "bemessung", "kraftbeme", "stahlbeton"}
+        expanded = _expand_compounds(["querkraftbemessung"], vocabulary)
+        assert expanded == ["querkraftbemessung", "bemessung", "kraftbeme", "querkraft"]
+
+    def test_result_does_not_depend_on_set_construction_order(self):
+        words = ["querkraft", "bemessung", "kraftbeme"]
+        first = _expand_compounds(["querkraftbemessung"], set(words))
+        second = _expand_compounds(["querkraftbemessung"], set(reversed(words)))
+        assert first == second

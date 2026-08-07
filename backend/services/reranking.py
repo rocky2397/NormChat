@@ -39,6 +39,13 @@ def _expand_compounds(tokens: list[str], vocabulary: set[str]) -> list[str]:
     The corpus supplies the vocabulary rather than a dictionary or a
     stemmer, so the parts are guaranteed to be terms the documents actually
     use; longest first, since "querkraft" carries more meaning than "kraft".
+
+    Ties are broken alphabetically, and that matters more than it looks.
+    Sorting on length alone left equal-length candidates in set iteration
+    order, which Python randomises per process — so which parts survived the
+    cut changed between runs, the BM25 query changed with them, and the same
+    question returned different sources. It also made probe runs
+    incomparable: a measured rank could move without anything being changed.
     """
     expanded = list(tokens)
     for token in tokens:
@@ -46,8 +53,7 @@ def _expand_compounds(tokens: list[str], vocabulary: set[str]) -> list[str]:
             continue
         parts = sorted(
             (w for w in vocabulary if MIN_PART_LENGTH <= len(w) < len(token) and w in token),
-            key=len,
-            reverse=True,
+            key=lambda w: (-len(w), w),
         )
         expanded.extend(parts[:MAX_PARTS_PER_TOKEN])
     return expanded
