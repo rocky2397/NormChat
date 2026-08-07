@@ -136,6 +136,16 @@ sources than are listed, that is noted rather than guessed at.
 a source card shows. They differ from the printed page number in the
 document — EN 1992-1-1 §3.1.6 is PDF page 36, printed page 34.
 
+Each question below also carries a **gold block** — a fenced code block
+tagged `gold`, read by `backend/eval/retrieval_probe.py` for headless
+per-stage rank reporting. Each line is `norm_reference: page[, page ...]`,
+with pages as PDF page indices as defined above; a retrieved chunk counts
+as a hit when its `norm_reference` metadata matches and its `page_number`
+is in the page set. A block containing only `TBD` means the labels have
+not been signed off, and the probe skips that question. Labels are
+`(norm_reference, page)` pairs rather than chunk ids, because Chroma ids
+embed a per-ingestion document id and would not survive a re-ingest.
+
 ---
 
 ## Q1
@@ -153,6 +163,14 @@ document — EN 1992-1-1 §3.1.6 is PDF page 36, printed page 34.
   - Open question for review: should `ÖNORM EN 1991-1-2` (Einwirkungen im
     Brandfall) and the `1995-1-1` pair count as expected here, or is the
     question strictly about the fire parts?
+
+Gold block: still TBD — the expected sources above await engineering
+sign-off, so the probe skips this question.
+
+```gold
+TBD
+```
+
 - **Grading:**
   - `gut` — names both `ÖNORM EN 1995-1-2` and `ÖNORM B 1995-1-2`, and
     describes the B document as the national supplement to be applied
@@ -188,6 +206,14 @@ document — EN 1992-1-1 §3.1.6 is PDF page 36, printed page 34.
   - Open question for review: which of the two design methods (4.2.2 / 4.2.3)
     the answer should lead with for R60, and whether the load-combination
     clauses in B 1995-1-2 §5 belong in the expected set.
+
+Gold block: still TBD — the expected sources above await engineering
+sign-off, so the probe skips this question.
+
+```gold
+TBD
+```
+
 - **Grading:**
   - `gut` — gives the charring-based procedure (`Abbrandtiefe`, reduced
     cross-section) with the Austrian values, citing `EN 1995-1-2` §3.4.x /
@@ -210,6 +236,16 @@ document — EN 1992-1-1 §3.1.6 is PDF page 36, printed page 34.
 - **Expected sources:** _proposed_
   - `ÖNORM EN 1992-1-1` §6.2 Querkraft — p. 93
   - `ÖNORM B 1992-1-1` §9.2 Querkraft — p. 21
+
+Gold block — p. 93 is the §6.2 heading from the expected sources above;
+p. 97–98 are where run 8 located the §6.2.3 truss-model clauses it graded
+as the right EN citation (`eval/runs/2026-08-06-current.md`):
+
+```gold
+ÖNORM EN 1992-1-1: 93, 97, 98
+ÖNORM B 1992-1-1: 21
+```
+
 - **Grading:**
   - `gut` — the truss model from `EN 1992-1-1` §6.2.3 *and* the Austrian
     provisions from `B 1992-1-1` §9.2, with the formulae intact.
@@ -236,6 +272,14 @@ document — EN 1992-1-1 §3.1.6 is PDF page 36, printed page 34.
 - **Expected sources:** _proposed_
   - `ÖNORM EN 1992-1-1` §6.5.4 Bemessung der Knoten — p. 120
   - `ÖNORM B 1992-1-1` §9.5 Stabwerkmodelle — p. 28
+
+Gold block:
+
+```gold
+ÖNORM EN 1992-1-1: 120
+ÖNORM B 1992-1-1: 28
+```
+
 - **Grading:**
   - `gut` — the §6.5.4 procedure with the k-values **as set for Austria** in
     `B 1992-1-1` §9.5.
@@ -270,6 +314,14 @@ document — EN 1992-1-1 §3.1.6 is PDF page 36, printed page 34.
     empfohlene Wert wird übernommen."*
   - An answer citing only the EN has not answered the question, which asks
     explicitly about national supplements.
+
+Gold block:
+
+```gold
+ÖNORM EN 1992-1-1: 36
+ÖNORM B 1992-1-1: 12
+```
+
 - **Grading:**
   - `gut` — states both recommended values with the part each comes from
     (`EN 1992-1-1` → 1,0; `EN 1992-2` → 0,85), the Austrian decision from

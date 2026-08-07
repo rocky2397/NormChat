@@ -1,5 +1,6 @@
 import difflib
 import re
+from dataclasses import dataclass, field
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -194,7 +195,31 @@ def _clause_reference_ids(
     ]
 
 
-def retrieve_sources(project_id: str, question: str) -> list[SourceChunk]:
+@dataclass
+class RetrievalTrace:
+    """Where every chunk id ranked at each stage of one retrieve_sources()
+    call, in pipeline order: dense -> lexical -> fused -> reranked -> final.
+
+    Filled in only when a caller passes an instance in. Recording is
+    write-only — it must never influence the ranking itself; a test asserts
+    the sources are identical with and without a trace attached. Exists for
+    backend/eval/retrieval_probe.py, which reports where the gold chunks
+    rank at each stage.
+    """
+
+    vector_ids: list[str] = field(default_factory=list)
+    bm25_ids: list[str] = field(default_factory=list)
+    fused_ids: list[str] = field(default_factory=list)
+    reranked_ids: list[str] = field(default_factory=list)
+    final_ids: list[str] = field(default_factory=list)
+    # Metadata for every chunk id in the collection, so a consumer can map
+    # any ranked id to (norm_reference, page_number) without re-querying.
+    id_to_meta: dict[str, dict] = field(default_factory=dict)
+
+
+def retrieve_sources(
+    project_id: str, question: str, trace: RetrievalTrace | None = None
+) -> list[SourceChunk]:
     collection = get_collection(project_id)
     total = collection.count()
     if total == 0:
@@ -223,6 +248,14 @@ def retrieve_sources(project_id: str, question: str) -> list[SourceChunk]:
     fused_docs = [id_to_doc[cid] for cid in fused_ids]
     final_ids = rerank_ids(question, fused_ids, fused_docs, settings.top_k_chunks)
 
+    if trace is not None:
+        trace.vector_ids = list(vector_ids)
+        trace.bm25_ids = list(bm25_ids)
+        trace.fused_ids = list(fused_ids)
+        # Snapshot before the clause-lookup pass mutates final_ids.
+        trace.reranked_ids = list(final_ids)
+        trace.id_to_meta = dict(id_to_meta)
+
     # Second pass: whatever clauses the first pass landed on, pull in the
     # places other documents modify them. Appended rather than substituted —
     # this adds the national deviation to the rule, it does not replace it.
@@ -242,6 +275,9 @@ def retrieve_sources(project_id: str, question: str) -> list[SourceChunk]:
                 break  # one modifying clause per parent clause is enough
         if len(final_ids) >= settings.top_k_chunks + CLAUSE_LOOKUP_LIMIT:
             break
+
+    if trace is not None:
+        trace.final_ids = list(final_ids)
 
     sources: list[SourceChunk] = []
     for cid in final_ids:
