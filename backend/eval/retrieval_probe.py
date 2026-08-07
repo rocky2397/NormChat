@@ -50,10 +50,18 @@ STAGES = (
 
 @dataclass(frozen=True)
 class GoldLabel:
-    """One expected source: a norm and the PDF pages its clause spans."""
+    """One expected source: a norm and the PDF pages its clause spans.
+
+    `pages` of None means any page of that document satisfies the label.
+    Some questions are document-level rather than clause-level — Q1 asks
+    which norms apply, and the answer is a set of documents, so pinning it
+    to a page would measure something the question never asks. Writing `*`
+    says that outright; listing every page of the PDF would express the
+    same thing while looking like a claim about clauses.
+    """
 
     norm_reference: str
-    pages: frozenset[int]
+    pages: frozenset[int] | None
 
 
 @dataclass(frozen=True)
@@ -107,7 +115,11 @@ def _parse_gold_block(section: str) -> tuple[GoldLabel, ...]:
         labels.append(
             GoldLabel(
                 norm_reference=normalize_reference_text(reference),
-                pages=frozenset(int(p) for p in pages.split(",")),
+                pages=(
+                    None
+                    if pages.strip() == "*"
+                    else frozenset(int(p) for p in pages.split(","))
+                ),
             )
         )
     return tuple(labels)
@@ -144,6 +156,8 @@ def chunk_matches_gold(meta: dict, gold: GoldLabel) -> bool:
     reference = normalize_reference_text(meta.get("norm_reference") or "")
     if reference != gold.norm_reference:
         return False
+    if gold.pages is None:
+        return True
     try:
         page = int(meta["page_number"])
     except (KeyError, TypeError, ValueError):
@@ -222,11 +236,15 @@ def render_report(
     ]
     for question_result in results:
         for row in question_result.rows:
-            pages = ", ".join(str(p) for p in sorted(row.gold.pages))
+            label = (
+                "any page"
+                if row.gold.pages is None
+                else "p. " + ", ".join(str(p) for p in sorted(row.gold.pages))
+            )
             cells = " | ".join(_format_rank(row.ranks[stage]) for stage, _ in STAGES)
             lines.append(
                 f"| Q{question_result.question.number} "
-                f"| `{row.gold.norm_reference}` p. {pages} | {cells} |"
+                f"| `{row.gold.norm_reference}` {label} | {cells} |"
             )
     lines += [
         "",

@@ -141,7 +141,11 @@ tagged `gold`, read by `backend/eval/retrieval_probe.py` for headless
 per-stage rank reporting. Each line is `norm_reference: page[, page ...]`,
 with pages as PDF page indices as defined above; a retrieved chunk counts
 as a hit when its `norm_reference` metadata matches and its `page_number`
-is in the page set. A block containing only `TBD` means the labels have
+is in the page set. Writing `*` instead of pages makes the label
+document-level — any chunk of that document counts. Use it only where the
+question really is about which documents apply rather than which clause
+does, as in Q1; elsewhere it would hide the distinction the set exists to
+measure. A block containing only `TBD` means the labels have
 not been signed off, and the probe skips that question. Labels are
 `(norm_reference, page)` pairs rather than chunk ids, because Chroma ids
 embed a per-ingestion document id and would not survive a re-ingest.
@@ -164,11 +168,18 @@ embed a per-ingestion document id and would not survive a re-ingest.
     Brandfall) and the `1995-1-1` pair count as expected here, or is the
     question strictly about the fire parts?
 
-Gold block: still TBD — the expected sources above await engineering
-sign-off, so the probe skips this question.
+Gold block — document-level, because the question is: it asks which norms
+apply, so the expectation is that a chunk of each document reaches the
+context, not that a particular clause does. `*` means any page.
+
+**Still unconfirmed** in the sense that the open question above — whether
+`EN 1991-1-2` and the `1995-1-1` pair also belong here — has not been
+settled. The two listed are the ones the question cannot be answered
+without.
 
 ```gold
-TBD
+ÖNORM EN 1995-1-2: *
+ÖNORM B 1995-1-2: *
 ```
 
 - **Grading:**
@@ -207,11 +218,20 @@ TBD
     the answer should lead with for R60, and whether the load-combination
     clauses in B 1995-1-2 §5 belong in the expected set.
 
-Gold block: still TBD — the expected sources above await engineering
-sign-off, so the probe skips this question.
+Gold block — the pages of the expected sources above: `EN 1995-1-2` §3.4.2
+*Ungeschützte Oberflächen* (p. 25), §4.2.2 *Methode mit reduziertem
+Querschnitt* (p. 35), §4.2.3 *Methode mit reduzierten Eigenschaften*
+(p. 36), and `B 1995-1-2` §6.1 *Abbrandtiefe* (p. 7).
+
+**Still unconfirmed.** These headings were located in the documents, but
+whether they are the *right* answer for R60 is an engineering judgement
+nobody has made. Filled in anyway because leaving it `TBD` made the probe
+skip Q2 — and Q2 is the question query expansion (#11) was built for, so
+its A/B was measured on every question except its own target.
 
 ```gold
-TBD
+ÖNORM EN 1995-1-2: 25, 35, 36
+ÖNORM B 1995-1-2: 7
 ```
 
 - **Grading:**
