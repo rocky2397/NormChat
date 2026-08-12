@@ -9,6 +9,11 @@ from config import settings
 from models.chat import ChatResponse, SourceChunk
 from services.embeddings import get_embeddings
 from services.query_expansion import expand_query
+from services.norm_identity import normalize_reference_text
+from services.reference_resolution import (
+    _reference_matches_document,
+    extract_clause_references,
+)
 from services.reranking import bm25_rank_ids, reciprocal_rank_fusion, rerank_ids
 from services.storage import get_collection
 
@@ -218,6 +223,105 @@ class RetrievalTrace:
     id_to_meta: dict[str, dict] = field(default_factory=dict)
 
 
+# How deep into the fused ranking a delta clause may sit and still be
+# admitted, and how many may be admitted per question. Deep enough that a
+# clause the fusion genuinely favoured is not lost to an arbitrary cut,
+# shallow enough that a delta which merely shares a number with something
+# retrieved cannot ride in on it.
+ANNEX_DELTA_FUSED_DEPTH = 25
+ANNEX_DELTA_ADMIT_LIMIT = 3
+
+
+def _covered_parent_clauses(
+    final_ids: list[str], id_to_doc: dict[str, str], id_to_meta: dict[str, dict]
+) -> set[tuple[str, str]]:
+    """(document designation, clause number) the reranked results already cover."""
+    covered: set[tuple[str, str]] = set()
+    for cid in final_ids:
+        meta = id_to_meta[cid]
+        reference = meta.get("norm_reference")
+        text = meta.get("raw_text") or id_to_doc[cid]
+        heading = _CLAUSE_HEADING.match(text)
+        if reference and heading:
+            covered.add((reference, heading.group(1)))
+    return covered
+
+
+def _delta_parent_is_covered(
+    raw_text: str, covered: set[tuple[str, str]]
+) -> bool:
+    """Whether this delta modifies a clause the reranked results landed on.
+
+    A delta names the clause it modifies. Admitting one whose parent nobody
+    retrieved would inject an unrelated rule: an early version admitted any
+    enriched chunk in the fused pool, and a question about which timber fire
+    norms apply came back citing ÖNORM B 1995-1-1 — a sibling annex whose
+    parent was never retrieved — while failing to name B 1995-1-2, the one
+    the question was about.
+
+    Prefix matching in both directions, because a delta may address
+    §3.1.6(1)P while the retrieved parent chunk is headed §3.1.6, or address
+    §6.2 while the parent chunk is headed §6.2.3.
+    """
+    for reference in extract_clause_references(raw_text):
+        for covered_reference, covered_clause in covered:
+            # The stored reference carries its publisher ("ÖNORM EN 1992-1-1")
+            # while a citation names only the norm ("EN 1992-1-1"), and the
+            # match must not let EN 1992-1 satisfy EN 1992-1-1. That is
+            # exactly what the resolver's own matcher already decides.
+            if not _reference_matches_document(reference, covered_reference):
+                continue
+            if covered_clause.startswith(reference.clause) or reference.clause.startswith(
+                covered_clause
+            ):
+                return True
+    return False
+
+
+def _admit_annex_deltas(
+    final_ids: list[str],
+    fused_ids: list[str],
+    id_to_doc: dict[str, str],
+    id_to_meta: dict[str, dict],
+) -> list[str]:
+    """Re-admits national-annex delta clauses the cross-encoder discarded.
+
+    A delta states its rule as a reference — "Festlegung zu ÖNORM
+    EN 1992-1-1, Abschnitt 3.1.6(1)P — Der empfohlene Wert wird übernommen."
+    Relevance by reference is not something a passage-ranking cross-encoder
+    represents: it scores (question, chunk) pairs, and that text shares
+    nothing with a question about concrete compressive strength.
+
+    Measured rather than assumed. With index-time enrichment the clause
+    reaches fused rank 3 and the reranker still drops it from a top ten, and
+    swapping in a model 4.8x larger with 16x the context moved reranked
+    recall from 3/10 to 4/10 while dropping that same clause. The mismatch
+    is in the training objective, not the capacity, so these chunks are
+    admitted on their fused rank rather than scored again.
+
+    Enrichment is the signal: services/reference_resolution.py records
+    raw_text only on chunks whose reference it actually resolved, so this
+    never fires on an unenriched project and never on ordinary prose.
+    """
+    covered = _covered_parent_clauses(final_ids, id_to_doc, id_to_meta)
+    if not covered:
+        return list(final_ids)
+
+    admitted = list(final_ids)
+    already = set(final_ids)
+    for cid in fused_ids[:ANNEX_DELTA_FUSED_DEPTH]:
+        if len(admitted) - len(final_ids) >= ANNEX_DELTA_ADMIT_LIMIT:
+            break
+        raw_text = id_to_meta[cid].get("raw_text")
+        if cid in already or not raw_text:
+            continue
+        if not _delta_parent_is_covered(raw_text, covered):
+            continue
+        already.add(cid)
+        admitted.append(cid)
+    return admitted
+
+
 def retrieve_sources(
     project_id: str, question: str, trace: RetrievalTrace | None = None
 ) -> list[SourceChunk]:
@@ -263,6 +367,7 @@ def retrieve_sources(
     fused_ids = reciprocal_rank_fusion(*rankings)[:pool_size]
     fused_docs = [id_to_doc[cid] for cid in fused_ids]
     final_ids = rerank_ids(question, fused_ids, fused_docs, settings.top_k_chunks)
+    final_ids = _admit_annex_deltas(final_ids, fused_ids, id_to_doc, id_to_meta)
 
     if trace is not None:
         trace.vector_ids = list(question_vector_ids)

@@ -1,6 +1,6 @@
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
 import tiktoken
@@ -8,6 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import settings
 from services.symbol_text import build_symbol_maps, extract_page_text
+from services.tables import TableBlock, extract_tables, split_table_rows
 
 _DIGIT_RUN = re.compile(r"\d+")
 BOILERPLATE_FREQUENCY_THRESHOLD = 0.6
@@ -24,6 +25,11 @@ CLAUSE_PATTERN = re.compile(
 class PageText:
     page_number: int
     text: str
+    # Grids on this page, serialised separately. The flattened copy is still
+    # in `text`: excluding it would mean rewriting extract_page_text(), which
+    # deliberately reproduces get_text() byte-for-byte because boilerplate
+    # detection depends on that layout.
+    tables: list[TableBlock] = field(default_factory=list)
 
 
 @dataclass
@@ -42,7 +48,13 @@ def extract_pages(pdf_path: str) -> list[PageText]:
         symbol_maps = build_symbol_maps(pdf)
         for index, page in enumerate(pdf, start=1):
             text = extract_page_text(page, symbol_maps)
-            pages.append(PageText(page_number=index, text=text.strip()))
+            pages.append(
+                PageText(
+                    page_number=index,
+                    text=text.strip(),
+                    tables=extract_tables(page, index),
+                )
+            )
     return pages
 
 
@@ -119,7 +131,13 @@ def strip_boilerplate(
             for i, line in enumerate(lines)
             if not (i in edge_idx and _normalize_line(line) in boilerplate_norms)
         ]
-        cleaned_pages.append(PageText(page_number=page.page_number, text="\n".join(kept).strip()))
+        cleaned_pages.append(
+            PageText(
+                page_number=page.page_number,
+                text="\n".join(kept).strip(),
+                tables=page.tables,
+            )
+        )
     return cleaned_pages, edition
 
 
@@ -161,7 +179,16 @@ def strip_front_matter(pages: list[PageText]) -> list[PageText]:
         text = page.text
         if (page.page_number == 1 and _COVER_MARKER.search(text)) or _is_contents_page(text):
             text = ""
-        cleaned.append(PageText(page_number=page.page_number, text=text))
+        # A blanked page loses its tables too: a contents page lists table
+        # captions, and keeping its grids would reintroduce exactly the noise
+        # this pass removes.
+        cleaned.append(
+            PageText(
+                page_number=page.page_number,
+                text=text,
+                tables=page.tables if text else [],
+            )
+        )
     return cleaned
 
 
@@ -216,6 +243,20 @@ def _token_splitter() -> RecursiveCharacterTextSplitter:
     )
 
 
+def _fits(splitter: RecursiveCharacterTextSplitter):
+    """Whether a piece is within the configured chunk budget.
+
+    Borrows the splitter's own length function so tables are measured the
+    same way prose is, rather than by a second, drifting definition.
+    """
+    length = splitter._length_function
+
+    def check(text: str) -> bool:
+        return length(text) <= settings.chunk_size
+
+    return check
+
+
 def chunk_pages(pages: list[PageText], norm_reference: str | None) -> list[TextChunk]:
     splitter = _token_splitter()
     chunks: list[TextChunk] = []
@@ -223,6 +264,23 @@ def chunk_pages(pages: list[PageText], norm_reference: str | None) -> list[TextC
     carried_heading = ""
 
     for page in pages:
+        # Tables are emitted whole rather than fed through the token
+        # splitter, which would cut a grid mid-row and destroy the column
+        # alignment the serialisation exists to preserve. Oversized ones are
+        # split by rows with the header repeated, so each piece stays
+        # readable on its own.
+        for table in page.tables:
+            for piece in split_table_rows(table.text, _fits(splitter)):
+                chunks.append(
+                    TextChunk(
+                        text=piece,
+                        page_number=table.page_number,
+                        chunk_index=chunk_index,
+                        norm_reference=norm_reference,
+                    )
+                )
+                chunk_index += 1
+
         if not page.text:
             continue
 

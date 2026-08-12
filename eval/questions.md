@@ -354,6 +354,85 @@ Gold block:
     a norm that does not govern the case. The baseline run did exactly this,
     with a confident "Ja".
 
+## Q6
+
+> Welche Mindestbetondeckung c_min,dur ist in Österreich für Betonstahl in der
+> Expositionsklasse XC4 anzusetzen? Prüfe die aktuelle Normung samt
+> nationaler Ergänzungen.
+
+- **Family:** EN 1992-1-1 (Dauerhaftigkeit, Betondeckung)
+- **Probes:** whether an answer that lives in a **table cell** can be reached
+  at all. The other five questions are answered by prose clauses; this one
+  is not. `c_min,dur` is given per exposure class in a grid, and the
+  extractor flattens grids into a bare column of values — row and column
+  association survive only as reading order, so the model must reconstruct
+  which number belongs to XC4.
+- **Added by Claude, not by the engineer who wrote Q1–Q5.** It exists to
+  measure a known pipeline gap (see the images/tables note below), and the
+  question itself has not been reviewed for whether it is one an engineer
+  would actually ask.
+- **Expected sources:** _proposed_
+  - `ÖNORM EN 1992-1-1` — the `c_min,dur` tables, pp. 56–57
+  - `ÖNORM B 1992-1-1` §7.1–7.7 Dauerhaftigkeit und Betondeckung — pp. 13–14
+- **The numeric answer is deliberately not stated here.** Reading it off the
+  grid requires knowing which Anforderungsklasse applies, which is an
+  engineering judgement; recording a value nobody has confirmed would put
+  unverified ground truth into the one file that is supposed to catch it.
+- **Grading:**
+  - `gut` — names the correct `c_min,dur` for XC4 with the Anforderungsklasse
+    it assumed, cites the EN table, and reflects the Austrian provisions in
+    `B 1992-1-1` §7.
+  - `mittel` — reaches the table and the national clauses but will not commit
+    to a value, or states the value without saying which class it assumed.
+  - `schlecht` — gives a number that is not in the table, silently picks a
+    class, or claims national provisions without citing one.
+
+Gold block — the pages carrying the tables and the national provisions.
+Document-level would be too coarse here: the point is whether the *table
+page* is reached.
+
+```gold
+ÖNORM EN 1992-1-1: 56, 57
+ÖNORM B 1992-1-1: 13, 14
+```
+
+## Q7
+
+> Wie wird die effektive Stützweite l_eff eines Stahlbetonbalkens bestimmt,
+> und wie ist das Auflagermaß a_i bei einem nicht durchlaufenden Bauteil
+> anzusetzen?
+
+- **Family:** EN 1992-1-1 (Schnittgrößenermittlung, effektive Stützweite)
+- **Probes:** whether an answer carried by a **figure** can be reached.
+  `Bild 5.4` defines l_eff for each support condition graphically, and the
+  page carries no prose explaining it — everything the page contains is the
+  figure's own labels: `a_i = min {1/2h; 1/2t}`, `(a) nicht durchlaufende
+  Bauteile`, `(b) durchlaufende Bauteile`, `(e) Kragarm`. Those labels are
+  real text and already indexed, but as isolated fragments with no
+  connection to the caption that names them.
+- **Added by Claude, not by the engineer who wrote Q1–Q5.** Like Q6 it
+  exists to measure a known pipeline gap, and has not been reviewed for
+  whether it is a question an engineer would actually ask.
+- **Expected sources:** _proposed_
+  - `ÖNORM EN 1992-1-1` — `Bild 5.4` and the surrounding §5.3.2.2, p. 66
+- **No Austrian annex is expected.** `ÖNORM B 1992-1-1` contains **no
+  figures at all**, so unlike Q1–Q6 this question does not test the EN/B
+  pairing. That is deliberate: it isolates the figure question from the
+  national-annex question the rest of the set already covers.
+- **Grading:**
+  - `gut` — states l_eff = l_n + a_1 + a_2 with a_i taken from the figure
+    (`min {1/2h; 1/2t}` for a non-continuous member) and cites `Bild 5.4`.
+  - `mittel` — reaches the clause and the figure but will not commit to how
+    a_i is determined, or gives it without saying which support case.
+  - `schlecht` — invents a value or rule for a_i, or attributes it to a
+    clause that does not carry it.
+
+Gold block — the figure page.
+
+```gold
+ÖNORM EN 1992-1-1: 66
+```
+
 ---
 
 ## Known limitation of this set
