@@ -77,7 +77,11 @@ class TestParseQuestions:
         # project that took an hour to ingest.
         questions = parse_questions(QUESTIONS_FILE.read_text(encoding="utf-8"))
         by_number = {q.number: q for q in questions}
-        assert set(by_number) == {1, 2, 3, 4, 5}
+        # Q6 was added to cover tables, a content type the other five never
+        # exercise; assert the set is contiguous rather than a fixed size, so
+        # adding a question does not fail this test.
+        assert set(by_number) == set(range(1, max(by_number) + 1))
+        assert max(by_number) >= 5
         # Every question now carries gold. Q1 is document-level (`*`),
         # because it asks which norms apply rather than which clause does.
         assert all(by_number[n].gold for n in (1, 2, 3, 4, 5))

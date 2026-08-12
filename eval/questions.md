@@ -354,6 +354,48 @@ Gold block:
     a norm that does not govern the case. The baseline run did exactly this,
     with a confident "Ja".
 
+## Q6
+
+> Welche Mindestbetondeckung c_min,dur ist in Österreich für Betonstahl in der
+> Expositionsklasse XC4 anzusetzen? Prüfe die aktuelle Normung samt
+> nationaler Ergänzungen.
+
+- **Family:** EN 1992-1-1 (Dauerhaftigkeit, Betondeckung)
+- **Probes:** whether an answer that lives in a **table cell** can be reached
+  at all. The other five questions are answered by prose clauses; this one
+  is not. `c_min,dur` is given per exposure class in a grid, and the
+  extractor flattens grids into a bare column of values — row and column
+  association survive only as reading order, so the model must reconstruct
+  which number belongs to XC4.
+- **Added by Claude, not by the engineer who wrote Q1–Q5.** It exists to
+  measure a known pipeline gap (see the images/tables note below), and the
+  question itself has not been reviewed for whether it is one an engineer
+  would actually ask.
+- **Expected sources:** _proposed_
+  - `ÖNORM EN 1992-1-1` — the `c_min,dur` tables, pp. 56–57
+  - `ÖNORM B 1992-1-1` §7.1–7.7 Dauerhaftigkeit und Betondeckung — pp. 13–14
+- **The numeric answer is deliberately not stated here.** Reading it off the
+  grid requires knowing which Anforderungsklasse applies, which is an
+  engineering judgement; recording a value nobody has confirmed would put
+  unverified ground truth into the one file that is supposed to catch it.
+- **Grading:**
+  - `gut` — names the correct `c_min,dur` for XC4 with the Anforderungsklasse
+    it assumed, cites the EN table, and reflects the Austrian provisions in
+    `B 1992-1-1` §7.
+  - `mittel` — reaches the table and the national clauses but will not commit
+    to a value, or states the value without saying which class it assumed.
+  - `schlecht` — gives a number that is not in the table, silently picks a
+    class, or claims national provisions without citing one.
+
+Gold block — the pages carrying the tables and the national provisions.
+Document-level would be too coarse here: the point is whether the *table
+page* is reached.
+
+```gold
+ÖNORM EN 1992-1-1: 56, 57
+ÖNORM B 1992-1-1: 13, 14
+```
+
 ---
 
 ## Known limitation of this set
