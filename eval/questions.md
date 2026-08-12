@@ -396,6 +396,43 @@ page* is reached.
 ÖNORM B 1992-1-1: 13, 14
 ```
 
+## Q7
+
+> Wie wird die effektive Stützweite l_eff eines Stahlbetonbalkens bestimmt,
+> und wie ist das Auflagermaß a_i bei einem nicht durchlaufenden Bauteil
+> anzusetzen?
+
+- **Family:** EN 1992-1-1 (Schnittgrößenermittlung, effektive Stützweite)
+- **Probes:** whether an answer carried by a **figure** can be reached.
+  `Bild 5.4` defines l_eff for each support condition graphically, and the
+  page carries no prose explaining it — everything the page contains is the
+  figure's own labels: `a_i = min {1/2h; 1/2t}`, `(a) nicht durchlaufende
+  Bauteile`, `(b) durchlaufende Bauteile`, `(e) Kragarm`. Those labels are
+  real text and already indexed, but as isolated fragments with no
+  connection to the caption that names them.
+- **Added by Claude, not by the engineer who wrote Q1–Q5.** Like Q6 it
+  exists to measure a known pipeline gap, and has not been reviewed for
+  whether it is a question an engineer would actually ask.
+- **Expected sources:** _proposed_
+  - `ÖNORM EN 1992-1-1` — `Bild 5.4` and the surrounding §5.3.2.2, p. 66
+- **No Austrian annex is expected.** `ÖNORM B 1992-1-1` contains **no
+  figures at all**, so unlike Q1–Q6 this question does not test the EN/B
+  pairing. That is deliberate: it isolates the figure question from the
+  national-annex question the rest of the set already covers.
+- **Grading:**
+  - `gut` — states l_eff = l_n + a_1 + a_2 with a_i taken from the figure
+    (`min {1/2h; 1/2t}` for a non-continuous member) and cites `Bild 5.4`.
+  - `mittel` — reaches the clause and the figure but will not commit to how
+    a_i is determined, or gives it without saying which support case.
+  - `schlecht` — invents a value or rule for a_i, or attributes it to a
+    clause that does not carry it.
+
+Gold block — the figure page.
+
+```gold
+ÖNORM EN 1992-1-1: 66
+```
+
 ---
 
 ## Known limitation of this set
