@@ -386,6 +386,11 @@ def retrieve_sources(
         id_to_meta[cid]["document_id"]: _norm_family(id_to_meta[cid].get("norm_reference"))
         for cid in final_ids
     }
+    # Counted on its own rather than against len(final_ids): _admit_annex_deltas
+    # appends to the same list, so a shared total let a full delta admission
+    # spend this budget before the lookup started and leave it a single slot —
+    # silently, and on exactly the annex-heavy questions both mechanisms serve.
+    looked_up = 0
     for clause, owner_id in _leading_clause_numbers(retrieved):
         for cid in _clause_reference_ids(
             clause, {owner_id}, all_ids, id_to_doc, id_to_meta, owner_family.get(owner_id)
@@ -393,8 +398,9 @@ def retrieve_sources(
             if cid not in already:
                 already.add(cid)
                 final_ids.append(cid)
+                looked_up += 1
                 break  # one modifying clause per parent clause is enough
-        if len(final_ids) >= settings.top_k_chunks + CLAUSE_LOOKUP_LIMIT:
+        if looked_up >= CLAUSE_LOOKUP_LIMIT:
             break
 
     if trace is not None:
