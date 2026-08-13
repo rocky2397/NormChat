@@ -64,6 +64,49 @@ already present in main's top 13, so the recovered chunk introduces no new
 conflict and cannot regress the answer through that path. An earlier
 suspicion that it might was wrong.
 
+## Page-level deduplication, added in response
+
+A citation in this product is a page: two chunks of one page open the same
+source card on the same highlight, so the second buys the user nothing and
+costs context. The lookup now skips any candidate whose (document, page) is
+already represented — seeded from `final_ids`, so pages the reranker or
+delta admission already placed are covered too.
+
+**Measured:** the gold-label table is again identical, and **zero** lookup
+chunks now land on an already-covered page (was 2 on Q5 alone). Q5 still
+fills all three slots; they are simply three different pages now.
+
+Remaining duplicate pages in the final context all come from the reranker
+and delta admission, which this change does not touch:
+
+| question | repeated pages after dedupe |
+| --- | --- |
+| Q4 | `EN 1992-1-1` p. 122 x2, `B 1992-1-1` p. 4 x2 |
+| Q5 | `B 1992-1-1` p. 12 x2 |
+| Q6 | `EN 1992-1-1` p. 57 x3, `B 1992-1-1` p. 13 x2, p. 14 x2 |
+| Q7 | `EN 1995-1-1` p. 55 x2 |
+
+## What the dedupe exposed in turn
+
+Q5's three slots are now three distinct pages — and all three are still
+`Tabelle 1 (Wahlmöglichkeiten)`, the annex's **index of national choices**:
+
+    B 1992-1-1 p. 6   Tabelle 1 (fortgesetzt) | Abschnitt gemaess OENORM EN 1992-1-1 ...
+    B 1992-1-1 p. 8   Tabelle 1 (fortgesetzt) | Abschnitt gemaess OENORM EN 1992-1-1 ...
+    B 1992-2   p. 7   Tabelle 1 - Wahlmoeglichkeiten | Abschnitt gemaess OENORM EN 1992-2 ...
+
+That table lists *every* EN clause carrying a national choice, so it
+contains every clause number and therefore matches every clause-number
+lookup. It is a magnet, and the lookup keeps hitting it instead of the
+substantive `Festlegung zu ...` clause.
+
+This matters beyond context economy: the grading rules in
+`eval/questions.md` state that a cited annex must be a **substantive
+clause**, and that a cover, foreword or contents page does not count. An
+index table is exactly that kind of non-substantive hit. **The clause lookup
+is spending its budget on content the rubric says does not count** — a
+better ticket than either defect fixed here.
+
 ## Reading
 
 - **The index cache is safe to take.** Identical retrieval output, and the
