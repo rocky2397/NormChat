@@ -75,6 +75,38 @@ def _is_unresolved_code(code: int) -> bool:
     return 0 <= code < 0x80 and bool(_RESIDUAL_CONTROL.match(chr(code)))
 
 
+# Layout, not glyphs. A Symbol subset can assign these codes, but they are
+# also what `get_text()` uses to separate lines, and replacing one collapses
+# page structure — measured on EN 1991-1-4 p. 110, where three newlines
+# became "ηηη" and ran three formula lines together.
+_LAYOUT_WHITESPACE = "\t\n\r"
+
+# Greek block, the only range the GID+29 offset is actually verified over.
+_GREEK_FIRST, _GREEK_LAST = 0x370, 0x3FF
+
+
+def _is_translatable(code: int, char: str) -> bool:
+    """Whether a code may be rewritten to `char`.
+
+    The offset was derived from two glyphs, α at /g68 and γ at /g74, and it
+    does not hold across the whole font: EN 1991-1-4 p. 112 assembles a large
+    bracket from high glyph ids, and running those through the same offset
+    turned the digits "3 4 5 6 7 8" into "⇐ ⇔ ∨ ⊂ ⊄ ⊇" — arrows and set
+    operators that appear nowhere in norm prose.
+
+    Control codes keep the full table: no text font emits them, the mapping
+    has been in use since the original fix, and it currently leaves zero
+    residual control characters across the corpus. Printable codes are
+    admitted only into the Greek block, which is what the offset was measured
+    on and what the formulas actually need.
+    """
+    if chr(code) in _LAYOUT_WHITESPACE:
+        return False
+    if _is_unresolved_code(code):
+        return True
+    return _GREEK_FIRST <= ord(char) <= _GREEK_LAST
+
+
 def _is_symbol_font(basename: str) -> bool:
     # Restricting to Symbol-named fonts keeps the translation away from
     # ordinary text fonts, where a control character means something else
@@ -109,16 +141,19 @@ def build_symbol_maps(doc: fitz.Document) -> dict[str, dict[int, str]]:
                     code = int(token)
                     continue
                 glyph_id = _GLYPH_ID_NAME.match(token)
-                # Only codes that extract as control characters are recorded.
-                # A Symbol subset also assigns codes in the printable ASCII
-                # range, but page text is a single string with no font
-                # attribution, so translating those would rewrite ordinary
-                # letters drawn in Arial or Times on the same page. Control
-                # characters are unambiguous: no text font produces them.
-                if glyph_id and _is_unresolved_code(code):
+                # Every code with a known meaning is recorded, printable ones
+                # included. A Symbol subset assigns codes across the printable
+                # ASCII range too — ÖNORM EN 1992-1-1 p. 98 draws α as 0x29
+                # and ν as 0x2B — and those only became safe to translate once
+                # translation moved to per-span, font-attributed replacement.
+                # The whole-page fallback below still takes control codes
+                # only, because there it has no font attribution and would
+                # rewrite ordinary letters drawn in Arial on the same page.
+                if glyph_id:
                     symbol_code = int(glyph_id.group(1)) + GID_TO_SYMBOL_CODE_OFFSET
-                    if symbol_code in ADOBE_SYMBOL:
-                        table[code] = ADOBE_SYMBOL[symbol_code]
+                    char = ADOBE_SYMBOL.get(symbol_code)
+                    if char and _is_translatable(code, char):
+                        table[code] = char
                 code += 1
 
             if table:
@@ -164,6 +199,49 @@ def _decode_per_span(page: fitz.Page, active: dict[str, dict[int, str]]) -> str:
     return "\n".join(lines)
 
 
+def _translate_symbol_spans(
+    page: fitz.Page, text: str, active: dict[str, dict[int, str]]
+) -> str:
+    """`text` with symbol glyphs replaced, using the font that drew each one.
+
+    Walks the spans in reading order and locates each one in the flat
+    `get_text()` string, advancing a cursor so a short span like ")" matches
+    its own occurrence rather than an earlier one. Only characters inside a
+    Symbol-font span are touched, so the ")" and "+" of `(cot θ + tan θ)`,
+    drawn in Arial on the very same line, are left alone while the ")" and
+    "+" beside them — which are α and ν in SymbolMT — are recovered.
+
+    Replacements are one character for one, and everything outside a matched
+    symbol span is copied verbatim, so the result is byte-identical to
+    `get_text()` wherever nothing was translated. That matters: rebuilding
+    the page from spans instead differs from `get_text()` on every page of
+    ÖNORM EN 1992-1-1, which would move every chunk boundary and every
+    boilerplate match in the corpus.
+
+    A span that cannot be located is skipped rather than guessed at.
+    """
+    out = list(text)
+    cursor = 0
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            for span in line["spans"]:
+                span_text = span["text"]
+                if not span_text:
+                    continue
+                start = text.find(span_text, cursor)
+                if start < 0:
+                    continue
+                cursor = start + len(span_text)
+                table = _lookup(span["font"], active)
+                if not table:
+                    continue
+                for offset, char in enumerate(span_text):
+                    replacement = table.get(ord(char))
+                    if replacement:
+                        out[start + offset] = replacement
+    return "".join(out)
+
+
 def extract_page_text(page: fitz.Page, maps: dict[str, dict[int, str]]) -> str:
     """Page text with Symbol-font glyphs resolved and unresolved ones removed.
 
@@ -172,20 +250,24 @@ def extract_page_text(page: fitz.Page, maps: dict[str, dict[int, str]]) -> str:
     through byte-identical.
     """
     text = page.get_text()
-    if not _RESIDUAL_CONTROL.search(text):
-        return text
-
     active = _page_font_maps(page, maps)
-    if active:
+
+    if active and any(ord(ch) in table for table in active.values() for ch in text):
+        text = _translate_symbol_spans(page, text, active)
+
+    if active and _RESIDUAL_CONTROL.search(text):
+        # Whatever is still a control character sits in a span the walk above
+        # could not locate. Falling back to a whole-page translation recovers
+        # it, but only for control codes: without font attribution a printable
+        # code would rewrite ordinary text.
         by_code: dict[int, set[str]] = {}
         for table in active.values():
             for code, char in table.items():
-                by_code.setdefault(code, set()).add(char)
-
-        if any(len(chars) > 1 for chars in by_code.values()):
-            text = _decode_per_span(page, active)
-        else:
-            text = text.translate({code: chars.pop() for code, chars in by_code.items()})
+                if _is_unresolved_code(code):
+                    by_code.setdefault(code, set()).add(char)
+        unambiguous = {code: chars.pop() for code, chars in by_code.items() if len(chars) == 1}
+        if unambiguous:
+            text = text.translate(unambiguous)
 
     # Whatever is still a control character belongs to a font this module
     # cannot resolve. Dropping it is deliberate: a wrong Greek letter changes
