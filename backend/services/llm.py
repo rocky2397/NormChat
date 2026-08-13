@@ -180,7 +180,9 @@ def _norm_family(norm_reference: str | None) -> str | None:
     return match.group(1) if match else None
 
 
-def _states_modification(text: str, clause: str) -> bool:
+def _states_modification(
+    text: str, clause: str, owner_reference: str | None = None
+) -> bool:
     """Whether this chunk states a modification *of* that clause, rather than
     merely containing its number.
 
@@ -198,8 +200,13 @@ def _states_modification(text: str, clause: str) -> bool:
     "Ergänzung zur" and "Erläuterung zur" alike. Prefix matching runs both
     ways: a chunk may address §3.1.6(1)P while the retrieved parent is
     headed §3.1.6, or address §6.2 while the parent is headed §6.2.3.
+
+    `owner_reference` is the candidate's own norm. It is what lets a German
+    national annex be recognised at all: those state "NDP zu 6.2.3" without
+    naming the norm, and the reference only resolves against the parent the
+    annex's own designation identifies.
     """
-    for reference in extract_clause_references(text):
+    for reference in extract_clause_references(text, owner_reference):
         if reference.clause.startswith(clause) or clause.startswith(reference.clause):
             return True
     return False
@@ -242,7 +249,9 @@ def _clause_reference_ids(
     return sorted(
         candidates,
         key=lambda cid: not _states_modification(
-            id_to_meta[cid].get("raw_text") or id_to_doc[cid], clause
+            id_to_meta[cid].get("raw_text") or id_to_doc[cid],
+            clause,
+            id_to_meta[cid].get("norm_reference"),
         ),
     )
 
@@ -557,7 +566,9 @@ def _clause_lookup(
             meta = corpus.meta(cid)
             page = _page_key(meta)
             if page in covered_pages and not _states_modification(
-                meta.get("raw_text") or corpus.text(cid), clause
+                meta.get("raw_text") or corpus.text(cid),
+                clause,
+                meta.get("norm_reference"),
             ):
                 continue
             already.add(cid)

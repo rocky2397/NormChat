@@ -428,3 +428,54 @@ class TestIngestionFlag:
             )
         assert document.id is not None
         assert "Reference enrichment failed" in caplog.text
+
+
+class TestGermanNationalAnnexReferences:
+    """DIN national annexes never name the norm they modify.
+
+    They write "NDP zu 6.2.3(2)" — nationally determined parameter — or
+    "NCI zu 6.2.3" for complementary information. Measured on the DIN corpus:
+    1,487 occurrences across 51 documents, of which exactly one also names
+    the norm. Enrichment consequently resolved 4 chunks out of 21,909 German
+    ones, against 565 out of 10,511 Austrian.
+    """
+
+    NDP = "NDP zu 6.2.3(2)\nEs gilt der empfohlene Wert."
+    NCI = "NCI zu 9.2.2\nErgänzende Regelungen zur Querkraftbewehrung."
+
+    def test_ndp_resolves_against_the_annex_parent(self):
+        (ref,) = extract_clause_references(self.NDP, "DIN EN 1992-1-1/NA")
+        assert (ref.designation, ref.clause) == ("EN 1992-1-1", "6.2.3")
+
+    def test_nci_is_recognised_too(self):
+        (ref,) = extract_clause_references(self.NCI, "DIN EN 1992-1-1/NA")
+        assert (ref.designation, ref.clause) == ("EN 1992-1-1", "9.2.2")
+
+    def test_an_amended_annex_still_resolves_to_the_base_norm(self):
+        (ref,) = extract_clause_references(self.NDP, "DIN EN 1990/NA/A1")
+        assert ref.designation == "EN 1990"
+
+    def test_a_bare_reference_outside_an_annex_is_not_resolved(self):
+        # The rule the exception is carved out of: several documents in a
+        # project share clause numbers, so "NDP zu 6.2.3" in an ordinary
+        # document cannot be attributed to any one of them.
+        assert extract_clause_references(self.NDP, "DIN EN 1992-1-1") == []
+        assert extract_clause_references(self.NDP) == []
+
+    def test_the_austrian_form_is_unaffected(self):
+        text = (
+            "6.1.4 Festlegung zu ÖNORM EN 1992-1-1:2015, Abschnitt 3.1.6(1)P\n"
+            "Der empfohlene Wert wird übernommen."
+        )
+        (ref,) = extract_clause_references(text, "ÖNORM B 1992-1-1")
+        assert (ref.designation, ref.clause) == ("EN 1992-1-1", "3.1.6")
+
+    def test_annex_letter_clauses_are_left_alone(self):
+        # "NDP zu A2.3.1" — 57 of the 1,487. Chunk headings are digits-only,
+        # so such a clause has nothing to resolve against and matching it
+        # would only produce unresolved-reference log noise.
+        assert extract_clause_references("NDP zu A2.3.1 (5)", "DIN EN 1990/NA") == []
+
+    def test_a_top_level_reference_is_not_a_clause(self):
+        # Mirrors the existing rule: only sub-level numbers become headings.
+        assert extract_clause_references("NDP zu 6 Anmerkung", "DIN EN 1990/NA") == []
