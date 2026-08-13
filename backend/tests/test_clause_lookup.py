@@ -5,7 +5,11 @@ while carrying no domain vocabulary of its own, so it is unreachable by
 embedding or BM25. See eval/runs/2026-08-06-front-matter-and-labels.md.
 """
 
-from services.llm import _clause_reference_ids, _leading_clause_numbers
+from services.llm import (
+    _clause_reference_ids,
+    _leading_clause_numbers,
+    _states_modification,
+)
 
 
 class TestLeadingClauseNumbers:
@@ -97,3 +101,77 @@ class TestNormFamilyScope:
         }
         found = _clause_reference_ids("9.2.2", {"en1992"}, ids, docs, meta, family="1992")
         assert found == ["concrete_annex"]
+
+
+class TestModificationPreference:
+    """The register problem.
+
+    Every ÖNORM B annex opens with "Tabelle 1 — Wahlmöglichkeiten", a table
+    listing every EN clause that carries a national choice. It contains every
+    clause number, so it matched every lookup, while the clause stating the
+    actual deviation matches exactly one. On corpus order the register won:
+    measured, 11 of 20 clause-lookup slots across the reference questions
+    were register fragments, and ÖNORM B 1992-1-1 §9.1.1 — Q3's expected
+    source — was never retrieved at any stage in any run.
+    """
+
+    REGISTER = (
+        "Tabelle 1 (fortgesetzt) | Abschnitt gemäß ÖNORM EN 1992-1-1:2015 "
+        "mit Wahlmöglichkeit | 3.1.2 | 3.1.6 | 6.1 | 6.2.3 | 7.2 | 9.2.2 |"
+    )
+    RULE = (
+        "9.1.1 Ergänzung zur ÖNORM EN 1992-1-1:2015, Abschnitt 6.1\n"
+        "Bei der Bemessung über die Mindestexzentrizität hinaus gilt ..."
+    )
+
+    ids = ["register", "rule"]
+    docs = {"register": REGISTER, "rule": RULE}
+    meta = {
+        "register": {"document_id": "b", "norm_reference": "ÖNORM B 1992-1-1"},
+        "rule": {"document_id": "b", "norm_reference": "ÖNORM B 1992-1-1"},
+    }
+
+    def _find(self, clause):
+        return _clause_reference_ids(clause, {"en"}, self.ids, self.docs, self.meta)
+
+    def test_a_clause_stating_the_modification_outranks_the_register(self):
+        # The register is first in corpus order and still loses.
+        assert self._find("6.1")[0] == "rule"
+
+    def test_the_register_is_kept_as_a_fallback_not_discarded(self):
+        # A preference, not a filter: an annex phrasing its deviations in a
+        # way the resolver does not parse must degrade to the old behaviour
+        # rather than return nothing.
+        assert set(self._find("6.1")) == {"rule", "register"}
+
+    def test_a_clause_the_rule_does_not_address_still_finds_the_register(self):
+        # 3.1.2 appears only in the register here, so it is all there is.
+        assert self._find("3.1.2") == ["register"]
+
+    def test_order_is_stable_among_equally_preferred_candidates(self):
+        # Determinism matters more than it looks: a probe rank that moves
+        # without a change being made makes every run note incomparable.
+        ids = ["a", "b", "c"]
+        docs = {i: f"{i} Abschnitt 6.1 erwähnt" for i in ids}
+        meta = {i: {"document_id": "b", "norm_reference": "ÖNORM B 1992-1-1"} for i in ids}
+        assert _clause_reference_ids("6.1", {"en"}, ids, docs, meta) == ids
+
+
+class TestStatesModification:
+    def test_recognises_the_austrian_phrasings(self):
+        for verb in ("Festlegung zu", "Festlegung zur", "Ergänzung zur",
+                     "Erläuterung zur", "Nationale Festlegung zu"):
+            text = f"9.2.4 {verb} ÖNORM EN 1992-1-1:2015, Abschnitt 6.2.3(2)"
+            assert _states_modification(text, "6.2.3"), verb
+
+    def test_a_bare_mention_of_the_number_is_not_a_modification(self):
+        assert not _states_modification("Siehe auch 6.2.3 in der Tabelle.", "6.2.3")
+
+    def test_matches_a_parent_clause_stated_more_precisely(self):
+        # The chunk addresses 3.1.6(1)P; the retrieved parent is headed 3.1.6.
+        text = "6.1.4 Festlegung zu ÖNORM EN 1992-1-1:2015, Abschnitt 3.1.6(1)P"
+        assert _states_modification(text, "3.1.6")
+
+    def test_does_not_match_a_different_clause(self):
+        text = "6.1.4 Festlegung zu ÖNORM EN 1992-1-1:2015, Abschnitt 3.1.6(1)P"
+        assert not _states_modification(text, "9.5.2")

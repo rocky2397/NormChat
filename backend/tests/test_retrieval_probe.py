@@ -10,6 +10,7 @@ import pytest
 
 from eval.retrieval_probe import (
     QUESTIONS_FILE,
+    STAGES,
     GoldLabel,
     GoldResult,
     ProbeQuestion,
@@ -149,17 +150,20 @@ def _result(number, ranks_per_gold):
     return QuestionResult(question=question, rows=rows)
 
 
-STAGE_NAMES = ("dense", "lexical", "fused", "reranked", "final")
-
-
 def _ranks(*values):
-    return dict(zip(STAGE_NAMES, values))
+    """One rank per pipeline stage, in order.
+
+    Taken from STAGES rather than restated, so adding a stage fails these
+    tests loudly instead of silently dropping a column from the report.
+    """
+    assert len(values) == len(STAGES), f"expected {len(STAGES)} ranks, got {len(values)}"
+    return dict(zip(STAGES, values))
 
 
 RESULTS = [
     _result(3, [
-        (GoldLabel("ÖNORM EN 1992-1-1", frozenset({93})), _ranks(4, 12, 3, 1, 1)),
-        (GoldLabel("ÖNORM B 1992-1-1", frozenset({21})), _ranks(None, 57, 80, None, None)),
+        (GoldLabel("ÖNORM EN 1992-1-1", frozenset({93})), _ranks(4, 12, 3, 1, 1, 1)),
+        (GoldLabel("ÖNORM B 1992-1-1", frozenset({21})), _ranks(None, 57, 80, None, None, None)),
     ]),
 ]
 
@@ -173,8 +177,8 @@ class TestRecallAndReport:
 
     def test_report_shows_ranks_misses_recall_and_skips(self):
         report = render_report("proj-1", RESULTS, skipped=[1, 2], date_str="2026-08-07")
-        assert "| Q3 | `ÖNORM B 1992-1-1` p. 21 | miss | 57 | 80 | miss | miss |" in report
-        assert "| Q3 | `ÖNORM EN 1992-1-1` p. 93 | 4 | 12 | 3 | 1 | 1 |" in report
+        assert "| Q3 | `ÖNORM B 1992-1-1` p. 21 | miss | 57 | 80 | miss | miss | miss |" in report
+        assert "| Q3 | `ÖNORM EN 1992-1-1` p. 93 | 4 | 12 | 3 | 1 | 1 | 1 |" in report
         assert "| dense | 1/2 (0.50) | 1/2 (0.50) |" in report
         assert "| fused | 1/2 (0.50) | 2/2 (1.00) |" in report
         assert "Q1, Q2" in report
