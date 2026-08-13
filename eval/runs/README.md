@@ -72,3 +72,39 @@ national provisions it cannot source, and that is what decides the grade.
 Under the old scoring that improvement showed as `schlecht` → `mittel`;
 under the current one it does not show at all, because the failure that
 matters never went away.
+
+### Update, 2026-08-13 — Q3 reaches `gut`
+
+Q3 was the question that had never improved: it claimed national provisions
+it could not source. It is now **`gut`**, the first time in this history.
+Full detail in `2026-08-13-stages-trace-and-clause-ordering.md`; three fixes
+were needed and each was invisible until the one before it landed.
+
+1. **The register was winning every lookup.** `ÖNORM B 1992-1-1` opens with
+   "Tabelle 1 — Wahlmöglichkeiten", which lists every EN clause carrying a
+   national choice and so matches every clause-number lookup, while the
+   clause stating the actual deviation matches one. Candidates are now
+   ordered by whether they state a modification of the clause. Q3 moved to
+   `mittel`: sourced to a real clause, but §9.1.1 — a *bending* Ergänzung on
+   a Querkraft question.
+2. **Page deduplication was blocking the right clause.** p. 21 carries both
+   §9.1.1 (Biegung) and §9.2.4 (Querkraft), and parent clause 6.1 is walked
+   before 6.2.3, so the bending clause took the page. The page rule now
+   yields to a candidate that states the modification.
+3. **`CLAUSE_LOOKUP_LIMIT` 3 → 4**, because §6.2.3 is the fourth parent
+   clause walked. This is fitted to seven questions and is flagged as such.
+
+The answer now quotes §9.2.4 verbatim — *"die Neigung der Betondruckstreben
+im Bereich 0,6 ≤ tan θ ≤ 1,0"* — attributed to `ÖNORM B 1992-1-1`, alongside
+the EN §6.2.3 truss model.
+
+**Three caveats before this row is trusted.** The grade was assigned by
+Claude on a single generation at non-zero temperature. The highlight check
+was not run. And the answer still reproduces a corrupted `V_Rd,max`: the EN
+p. 98 chunk extracts `α_cw` as `)cw` and `ν_1` as `+1`, so the model
+transcribes a wrong formula faithfully — an extraction defect, tracked
+separately.
+
+The table above is **not** updated: only Q3 was re-run, and a row implies all
+five. It should be regenerated in one pass, by a human, when the question set
+is confirmed.
