@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 
 from rank_bm25 import BM25Okapi
@@ -33,7 +34,7 @@ MIN_PART_LENGTH = 5
 MAX_PARTS_PER_TOKEN = 3
 
 
-def _expand_compounds(tokens: list[str], vocabulary: set[str]) -> list[str]:
+def _expand_compounds(tokens: list[str], vocabulary: frozenset[str] | set[str]) -> list[str]:
     """Adds the corpus words that a long query token is built from.
 
     The corpus supplies the vocabulary rather than a dictionary or a
@@ -59,6 +60,29 @@ def _expand_compounds(tokens: list[str], vocabulary: set[str]) -> list[str]:
     return expanded
 
 
+@dataclass(frozen=True)
+class _LexicalIndex:
+    bm25: BM25Okapi
+    ids: tuple[str, ...]
+    vocabulary: frozenset[str]
+
+
+# Building this tokenizes the whole corpus, and it was rebuilt on every call:
+# once per request with expansion off, and once per sub-query with it on, so
+# a five-probe request tokenized ~20k chunks five times while the user waited.
+# The corpus itself is the cache key, so an ingest invalidates it by changing
+# the ids; maxsize=1 keeps a single project's index resident, which matters on
+# a small instance where the tokenized corpus is the largest object in memory.
+@lru_cache(maxsize=1)
+def _get_lexical_index(ids: tuple[str, ...], documents: tuple[str, ...]) -> _LexicalIndex:
+    tokenized = [_tokenize(doc) for doc in documents]
+    return _LexicalIndex(
+        bm25=BM25Okapi(tokenized),
+        ids=ids,
+        vocabulary=frozenset(word for doc in tokenized for word in doc),
+    )
+
+
 def bm25_rank_ids(query: str, ids: list[str], documents: list[str]) -> list[str]:
     """Ranks chunk ids by keyword (BM25) match against the query, best first.
 
@@ -67,12 +91,10 @@ def bm25_rank_ids(query: str, ids: list[str], documents: list[str]) -> list[str]
     """
     if not documents:
         return []
-    tokenized = [_tokenize(doc) for doc in documents]
-    bm25 = BM25Okapi(tokenized)
-    vocabulary = {word for doc in tokenized for word in doc}
-    scores = bm25.get_scores(_expand_compounds(_tokenize(query), vocabulary))
+    index = _get_lexical_index(tuple(ids), tuple(documents))
+    scores = index.bm25.get_scores(_expand_compounds(_tokenize(query), index.vocabulary))
     order = sorted(range(len(documents)), key=lambda i: scores[i], reverse=True)
-    return [ids[i] for i in order]
+    return [index.ids[i] for i in order]
 
 
 def reciprocal_rank_fusion(*rankings: list[str], k: int = 60) -> list[str]:

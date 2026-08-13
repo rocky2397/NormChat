@@ -201,6 +201,14 @@ def _clause_reference_ids(
     ]
 
 
+def _page_key(meta: dict) -> tuple[str, int]:
+    """The unit a citation is rendered at: one document, one page."""
+    try:
+        return (meta["document_id"], int(meta["page_number"]))
+    except (KeyError, TypeError, ValueError):
+        return (meta.get("document_id", ""), -1)
+
+
 @dataclass
 class RetrievalTrace:
     """Where every chunk id ranked at each stage of one retrieve_sources()
@@ -386,15 +394,31 @@ def retrieve_sources(
         id_to_meta[cid]["document_id"]: _norm_family(id_to_meta[cid].get("norm_reference"))
         for cid in final_ids
     }
+    # A citation is a page, not a chunk: two chunks of one page open the same
+    # source card on the same highlight, so the second buys the user nothing
+    # and costs context. Several parent clauses resolve independently here and
+    # nothing else stops them landing on one page — measured, the lookup spent
+    # all three of Q5's slots on fragments of a single continued table on
+    # ÖNORM B 1992-1-1 p. 6 (eval/runs/2026-08-13-budget-separation-and-index-cache.md).
+    covered_pages = {_page_key(id_to_meta[cid]) for cid in final_ids}
+    # Counted on its own rather than against len(final_ids): _admit_annex_deltas
+    # appends to the same list, so a shared total let a full delta admission
+    # spend this budget before the lookup started and leave it a single slot —
+    # silently, and on exactly the annex-heavy questions both mechanisms serve.
+    looked_up = 0
     for clause, owner_id in _leading_clause_numbers(retrieved):
         for cid in _clause_reference_ids(
             clause, {owner_id}, all_ids, id_to_doc, id_to_meta, owner_family.get(owner_id)
         ):
-            if cid not in already:
-                already.add(cid)
-                final_ids.append(cid)
-                break  # one modifying clause per parent clause is enough
-        if len(final_ids) >= settings.top_k_chunks + CLAUSE_LOOKUP_LIMIT:
+            page = _page_key(id_to_meta[cid])
+            if cid in already or page in covered_pages:
+                continue
+            already.add(cid)
+            covered_pages.add(page)
+            final_ids.append(cid)
+            looked_up += 1
+            break  # one modifying clause per parent clause is enough
+        if looked_up >= CLAUSE_LOOKUP_LIMIT:
             break
 
     if trace is not None:
