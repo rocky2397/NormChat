@@ -28,6 +28,7 @@ def ingest_document(
     project_id: str,
     filename: str,
     file_bytes: bytes,
+    enrich: bool = True,
 ) -> Document:
     docs_dir = get_project_documents_dir(project_id)
     safe_name = Path(filename).name
@@ -101,16 +102,25 @@ def ingest_document(
     db.refresh(document)
 
     # A national annex may arrive before the norm it modifies, so reference
-    # enrichment runs as a project-level pass after every successful
-    # ingestion rather than once inside it. The document is committed either
-    # way: enrichment only changes what is searchable, so a failure here
-    # must not fail an otherwise completed upload.
-    if settings.reference_enrichment_enabled:
-        try:
-            enrich_project_references(project_id)
-        except Exception:
-            logger.exception("Reference enrichment failed for project %s", project_id)
+    # enrichment runs as a project-level pass after ingestion rather than
+    # once inside it. Because the pass scans the whole project, batch
+    # callers pass enrich=False per document and call run_enrichment_pass()
+    # once after the last one.
+    if enrich:
+        run_enrichment_pass(project_id)
     return document
+
+
+def run_enrichment_pass(project_id: str) -> None:
+    # Ingested documents are committed before this runs: enrichment only
+    # changes what is searchable, so a failure here must not fail an
+    # otherwise completed upload.
+    if not settings.reference_enrichment_enabled:
+        return
+    try:
+        enrich_project_references(project_id)
+    except Exception:
+        logger.exception("Reference enrichment failed for project %s", project_id)
 
 
 def delete_document_vectors(project_id: str, document_id: str) -> None:

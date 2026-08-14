@@ -18,11 +18,12 @@ export default function DocumentUpload({ onUpload, disabled = false }) {
 
       setError('')
       setUploading(true)
+      setProgress(0)
       try {
-        for (const file of pdfFiles) {
-          setProgress(0)
-          await onUpload(file, setProgress)
-        }
+        // One request for the whole batch: the backend runs the
+        // project-level reference-enrichment pass once per upload, not
+        // once per file.
+        await onUpload(pdfFiles, setProgress)
       } catch (err) {
         setError(err.response?.data?.detail || 'Upload fehlgeschlagen.')
       } finally {

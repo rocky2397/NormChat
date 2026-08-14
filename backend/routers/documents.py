@@ -8,7 +8,12 @@ from db.database import get_db
 from models.project import Project
 from models.project_schema import DocumentResponse
 from models.document import Document
-from services.ingestion import delete_document_vectors, ingest_document, remove_document_file
+from services.ingestion import (
+    delete_document_vectors,
+    ingest_document,
+    remove_document_file,
+    run_enrichment_pass,
+)
 from services.pdf_highlight import build_highlighted_copy
 
 router = APIRouter(tags=["documents"])
@@ -29,36 +34,50 @@ def list_documents(project_id: str, db: Session = Depends(get_db)):
 
 @router.post(
     "/projects/{project_id}/documents",
-    response_model=DocumentResponse,
+    response_model=list[DocumentResponse],
     status_code=201,
 )
-async def upload_document(
+async def upload_documents(
     project_id: str,
-    file: UploadFile = File(...),
+    file: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Projekt nicht gefunden")
 
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Nur PDF-Dateien werden unterstützt")
+    for upload in file:
+        if not upload.filename or not upload.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Nur PDF-Dateien werden unterstützt")
 
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="Leere Datei")
-
+    # The enrichment pass scans the whole project, so a batch ingests every
+    # file with enrich=False and runs the pass once at the end. The finally
+    # covers partial failure: files ingested before the failing one are
+    # committed and must not be left unenriched.
+    documents = []
     try:
-        document = ingest_document(db, project_id, file.filename, file_bytes)
-    except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Dokument konnte nicht verarbeitet werden: {exc}",
-        ) from exc
+        for upload in file:
+            file_bytes = await upload.read()
+            if not file_bytes:
+                raise HTTPException(status_code=400, detail="Leere Datei")
+            try:
+                documents.append(
+                    ingest_document(
+                        db, project_id, upload.filename, file_bytes, enrich=False
+                    )
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Dokument konnte nicht verarbeitet werden: {exc}",
+                ) from exc
+    finally:
+        if documents:
+            run_enrichment_pass(project_id)
 
-    return document
+    return documents
 
 
 @router.get("/documents/{document_id}/file")
