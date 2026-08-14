@@ -21,9 +21,16 @@ class Settings(BaseSettings):
     retrieval_candidate_pool: int = 100
     reranker_model: str = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
     # Index-time reference enrichment for national-annex delta clauses
-    # (services/reference_resolution.py). Off by default so the retrieval
-    # probe can measure both arms against the same corpus.
-    reference_enrichment_enabled: bool = False
+    # (services/reference_resolution.py). On by default: surfacing a European
+    # clause together with its national modification is the capability this
+    # product exists for, and without enrichment the delta-admission path is
+    # inert, because it keys on the raw_text this pass records. It was off
+    # while the probe needed to measure both arms against one corpus; that
+    # comparison is done (eval/runs/2026-08-13-*.md).
+    #
+    # No LLM is involved. The pass re-embeds only the chunks it changes, and
+    # is deterministic and idempotent, so a re-run never appends twice.
+    reference_enrichment_enabled: bool = True
 
     # Pre-retrieval sub-query expansion (services/query_expansion.py). Off by
     # default; adds one LLM call to the critical path, so it uses the cheapest

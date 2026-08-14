@@ -383,15 +383,22 @@ class TestIngestionFlag:
         )
         return ingestion_module, calls
 
-    def test_the_flag_defaults_to_off(self):
+    def test_the_flag_defaults_to_on(self):
+        # Surfacing a European clause with its national modification is the
+        # capability the product exists for, and delta admission is inert
+        # without the raw_text this pass records.
         from config import Settings
 
-        assert Settings(_env_file=None).reference_enrichment_enabled is False
+        assert Settings(_env_file=None).reference_enrichment_enabled is True
 
     def test_no_enrichment_pass_when_the_flag_is_off(
-        self, db_session, project, ingestion
+        self, db_session, project, ingestion, monkeypatch
     ):
+        # Set explicitly rather than leaning on the default, which is now on.
         ingestion_module, calls = ingestion
+        monkeypatch.setattr(
+            ingestion_module.settings, "reference_enrichment_enabled", False
+        )
         ingestion_module.ingest_document(
             db_session, project.id, "OENORM_B_1992_1_1_2018_01_01.pdf", b"pdfbytes"
         )
