@@ -31,21 +31,17 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.llm import RetrievalTrace, retrieve_sources
+from services.llm import PIPELINE_STAGES, RetrievalTrace, retrieve_sources
 from services.norm_identity import normalize_reference_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 QUESTIONS_FILE = REPO_ROOT / "eval" / "questions.md"
 RUNS_DIR = REPO_ROOT / "eval" / "runs"
 
-# (report column, RetrievalTrace attribute), in pipeline order.
-STAGES = (
-    ("dense", "vector_ids"),
-    ("lexical", "bm25_ids"),
-    ("fused", "fused_ids"),
-    ("reranked", "reranked_ids"),
-    ("final", "final_ids"),
-)
+# Report columns, taken from the pipeline itself rather than restated here:
+# adding a stage adds a column, and a column can no longer name one stage
+# while reporting another. services/llm.py owns the order.
+STAGES = PIPELINE_STAGES
 
 
 @dataclass(frozen=True)
@@ -180,8 +176,8 @@ def probe_question(project_id: str, question: ProbeQuestion) -> QuestionResult:
         GoldResult(
             gold=gold,
             ranks={
-                stage: first_gold_rank(getattr(trace, attr), trace.id_to_meta, gold)
-                for stage, attr in STAGES
+                stage: first_gold_rank(trace.ids(stage), trace.id_to_meta, gold)
+                for stage in STAGES
             },
         )
         for gold in question.gold
@@ -231,7 +227,7 @@ def render_report(
         "are cut to context size, so a `miss` there with a hit upstream",
         "localizes where the chunk was lost.",
         "",
-        "| question | gold | " + " | ".join(stage for stage, _ in STAGES) + " |",
+        "| question | gold | " + " | ".join(STAGES) + " |",
         "| --- | --- | " + " | ".join("---" for _ in STAGES) + " |",
     ]
     for question_result in results:
@@ -241,7 +237,7 @@ def render_report(
                 if row.gold.pages is None
                 else "p. " + ", ".join(str(p) for p in sorted(row.gold.pages))
             )
-            cells = " | ".join(_format_rank(row.ranks[stage]) for stage, _ in STAGES)
+            cells = " | ".join(_format_rank(row.ranks[stage]) for stage in STAGES)
             lines.append(
                 f"| Q{question_result.question.number} "
                 f"| `{row.gold.norm_reference}` {label} | {cells} |"
@@ -255,7 +251,7 @@ def render_report(
         "| stage | recall@10 | recall@100 |",
         "| --- | --- | --- |",
     ]
-    for stage, _ in STAGES:
+    for stage in STAGES:
         lines.append(
             f"| {stage} | {_format_recall(*recall_at(results, stage, 10))} "
             f"| {_format_recall(*recall_at(results, stage, 100))} |"

@@ -24,7 +24,9 @@ from services.llm import (
 
 QUESTION = "Welche Festlegungen gelten für Stahlbeton nach ÖNORM B 1992-1-1?"
 
-TOP_K = 3
+# Four parents, so the clause lookup has enough distinct targets to fill
+# its budget — otherwise the fixture, not the budget, sets the ceiling.
+TOP_K = 4
 
 EN = "ÖNORM EN 1992-1-1"
 B = "ÖNORM B 1992-1-1"
@@ -66,12 +68,14 @@ CORPUS = {
     "en_316": ("3.1.6 Bemessungswert der Betondruckfestigkeit\n(1)P ...", _meta("en", EN, 36)),
     "en_623": ("6.2.3 Querkraft\nBauteile mit Querkraftbewehrung ...", _meta("en", EN, 97)),
     "en_952": ("9.5.2 Stützen\nLängsbewehrung ...", _meta("en", EN, 120)),
+    "en_742": ("7.4.2 Begrenzung der Verformungen\nGrenzwerte ...", _meta("en", EN, 130)),
     "b_316": (_delta("6.1.4", "3.1.6(1)P"), _meta("b", B, 12, _delta("6.1.4", "3.1.6(1)P"))),
     "b_623": (_delta("9.2.1", "6.2.3(2)"), _meta("b", B, 21, _delta("9.2.1", "6.2.3(2)"))),
     "b_952": (_delta("9.5.1", "9.5.2(2)"), _meta("b", B, 28, _delta("9.5.1", "9.5.2(2)"))),
     "c_316": (_rule("5.1", "3.1.6"), _meta("c", C, 5)),
     "c_623": (_rule("5.2", "6.2.3"), _meta("c", C, 6)),
     "c_952": (_rule("5.3", "9.5.2"), _meta("c", C, 7)),
+    "c_742": (_rule("5.4", "7.4.2"), _meta("c", C, 8)),
 }
 
 
@@ -127,13 +131,16 @@ def _trace():
 class TestBudgetsAreIndependent:
     def test_delta_admission_fills_its_own_budget(self, fake_pipeline):
         trace = _trace()
-        assert len(trace.reranked_ids) == TOP_K + ANNEX_DELTA_ADMIT_LIMIT
-        assert {"b_316", "b_623", "b_952"} <= set(trace.reranked_ids)
+        assert len(trace.deltas_admitted_ids) == TOP_K + ANNEX_DELTA_ADMIT_LIMIT
+        assert {"b_316", "b_623", "b_952"} <= set(trace.deltas_admitted_ids)
+        # And the reranker's own column reports the reranker only.
+        assert len(trace.reranked_ids) == TOP_K
+        assert not {"b_316", "b_623", "b_952"} & set(trace.reranked_ids)
 
     def test_clause_lookup_keeps_its_budget_after_a_full_admission(self, fake_pipeline):
         # The regression: with the cap read off len(final_ids), this was 1.
         trace = _trace()
-        assert len(trace.final_ids) - len(trace.reranked_ids) == CLAUSE_LOOKUP_LIMIT
+        assert len(trace.final_ids) - len(trace.deltas_admitted_ids) == CLAUSE_LOOKUP_LIMIT
 
     def test_the_lookup_reaches_all_three_target_documents(self, fake_pipeline):
         # The user-visible half: three national modifications in context
@@ -151,7 +158,8 @@ class TestBudgetsAreIndependent:
         _install(monkeypatch, unenriched)
         trace = _trace()
         assert len(trace.reranked_ids) == TOP_K
-        assert len(trace.final_ids) - len(trace.reranked_ids) == CLAUSE_LOOKUP_LIMIT
+        assert trace.deltas_admitted_ids == trace.reranked_ids
+        assert len(trace.final_ids) - len(trace.deltas_admitted_ids) == CLAUSE_LOOKUP_LIMIT
 
     def test_sources_returned_match_the_final_stage(self, fake_pipeline):
         trace = RetrievalTrace()
@@ -177,7 +185,7 @@ class TestPageLevelDeduplication:
         # same highlight, so the second spends a slot for nothing.
         _install(monkeypatch, _two_clause_corpus(second_page=5), top_k=2)
         trace = _trace()
-        appended = [c for c in trace.final_ids if c not in trace.reranked_ids]
+        appended = [c for c in trace.final_ids if c not in trace.deltas_admitted_ids]
         assert appended == ["d_316"]
 
     def test_the_same_clauses_on_different_pages_still_yield_two(self, monkeypatch):
@@ -185,7 +193,7 @@ class TestPageLevelDeduplication:
         # document, or it would suppress genuine second modifications.
         _install(monkeypatch, _two_clause_corpus(second_page=6), top_k=2)
         trace = _trace()
-        appended = [c for c in trace.final_ids if c not in trace.reranked_ids]
+        appended = [c for c in trace.final_ids if c not in trace.deltas_admitted_ids]
         assert appended == ["d_316", "d_623"]
 
     def test_a_page_already_in_context_is_not_looked_up_again(self, monkeypatch):
@@ -195,5 +203,49 @@ class TestPageLevelDeduplication:
         corpus["d_316"] = (corpus["d_316"][0], _meta("en", EN, 97))
         _install(monkeypatch, corpus, top_k=2)
         trace = _trace()
-        appended = [c for c in trace.final_ids if c not in trace.reranked_ids]
+        appended = [c for c in trace.final_ids if c not in trace.deltas_admitted_ids]
         assert "d_316" not in appended
+
+
+MODIFICATION = (
+    "9.2.4 Festlegung zur ÖNORM EN 1992-1-1:2015, Abschnitt 6.2.3(2)\n"
+    "Bei einer Spannungsbegrenzung gilt ..."
+)
+
+
+class TestPageRuleYieldsToTheRightClause:
+    """Two distinct clauses can share a page.
+
+    ÖNORM B 1992-1-1 p. 21 carries §9.1.1, a bending Ergänzung, and §9.2.4,
+    the Querkraft Festlegung. Parent clause 6.1 is walked before 6.2.3, so a
+    blanket page rule let the bending clause take the page and locked out the
+    shear clause — on the question whose whole purpose is to surface it.
+    """
+
+    def _corpus(self):
+        return {
+            "en_61": ("6.1 Biegung mit Normalkraft ...", _meta("en", EN, 90)),
+            "en_623": ("6.2.3 Querkraft — Fachwerkmodell ...", _meta("en", EN, 97)),
+            # Both national clauses live on page 21 of the same document.
+            "b_911": (
+                "9.1.1 Ergänzung zur ÖNORM EN 1992-1-1:2015, Abschnitt 6.1\nBei ...",
+                _meta("b", B, 21),
+            ),
+            "b_924": (MODIFICATION, _meta("b", B, 21)),
+        }
+
+    def test_the_second_clause_on_a_taken_page_is_still_admitted(self, monkeypatch):
+        _install(monkeypatch, self._corpus(), top_k=2)
+        trace = _trace()
+        appended = [c for c in trace.final_ids if c not in trace.deltas_admitted_ids]
+        assert appended == ["b_911", "b_924"]
+
+    def test_a_candidate_stating_no_modification_is_still_deduplicated(self, monkeypatch):
+        # The register case the page rule exists for: same page, no
+        # Festlegung, so the second one is still dropped.
+        corpus = self._corpus()
+        corpus["b_924"] = ("Tabelle 1 | 6.2.3 | 6.1 | 7.2 |", _meta("b", B, 21))
+        _install(monkeypatch, corpus, top_k=2)
+        trace = _trace()
+        appended = [c for c in trace.final_ids if c not in trace.deltas_admitted_ids]
+        assert appended == ["b_911"]

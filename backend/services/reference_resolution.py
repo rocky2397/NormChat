@@ -61,6 +61,40 @@ CLAUSE_REFERENCE_PATTERN = re.compile(
 )
 
 
+# German national annexes state their determinations differently, and never
+# name the norm: "NDP zu 6.2.3(2)" (nationally determined parameter) and
+# "NCI zu 6.2.3" (non-contradictory complementary information). Measured on
+# the DIN corpus: 1,487 occurrences across 51 documents, of which exactly one
+# also names the norm. The Austrian form — "Festlegung zu ÖNORM EN 1992-1-1,
+# Abschnitt 3.1.6(1)P" — names it every time, which is what the pattern above
+# was built for, and why enrichment resolved 4 chunks out of 21,909 German
+# ones against 565 out of 10,511 Austrian.
+#
+# A bare reference is still not resolvable in general — several documents in
+# a project share clause numbers — but inside a national annex it is: the
+# annex modifies its own parent, and its designation says which that is.
+# DIN EN 1991-1-1/NA addresses DIN EN 1991-1-1 and nothing else.
+NA_CLAUSE_PATTERN = re.compile(
+    r"\b(?:NDP|NCI)\s+zu\s+(?:Abschnitt\s*)?(?P<clause>\d+(?:\.\d+)+)"
+)
+
+# The parent of a national annex, read off its own designation. Annex-letter
+# clauses ("NDP zu A2.3.1", 57 of the 1,487) are deliberately not matched
+# above: chunk headings are digits-only, so such a clause has nothing to
+# resolve against and would only produce log noise.
+_NATIONAL_ANNEX = re.compile(
+    r"(?:DIN|ÖNORM|OENORM)?\s*(?P<series>EN|B)\s+(?P<number>\d{3,5}(?:-\d{1,2})*)\s*/\s*NA"
+)
+
+
+def _annex_parent(norm_reference: str | None) -> tuple[str, str] | None:
+    """(series, number) of the norm a national annex modifies, or None."""
+    if not norm_reference:
+        return None
+    match = _NATIONAL_ANNEX.search(normalize_reference_text(norm_reference))
+    return (match.group("series"), match.group("number")) if match else None
+
+
 @dataclass(frozen=True)
 class ClauseReference:
     series: str
@@ -72,24 +106,39 @@ class ClauseReference:
         return f"{self.series} {self.number}"
 
 
-def extract_clause_references(text: str) -> list[ClauseReference]:
+def extract_clause_references(
+    text: str, owner_reference: str | None = None
+) -> list[ClauseReference]:
     """Every (norm, clause) pair the text addresses by number, in order.
 
-    Only references that name their norm are extracted: a bare "Abschnitt
-    6.2.3" cannot be resolved deterministically when several documents in
-    the project share the clause number.
+    References that name their norm are extracted from any document. A bare
+    "Abschnitt 6.2.3" is not: several documents in a project share clause
+    numbers, so it cannot be resolved deterministically.
+
+    The exception is a national annex, which is what `owner_reference`
+    supplies. An annex modifies its own parent and nothing else, so the
+    German "NDP zu 6.2.3" and "NCI zu 6.2.3" resolve against the norm named
+    in the annex's own designation. Called without an owner, behaviour is
+    unchanged.
     """
+    flat = normalize_reference_text(text)
     references: list[ClauseReference] = []
     seen: set[ClauseReference] = set()
-    for match in CLAUSE_REFERENCE_PATTERN.finditer(normalize_reference_text(text)):
-        reference = ClauseReference(
-            series=match.group("series"),
-            number=match.group("number"),
-            clause=match.group("clause"),
-        )
+
+    def add(series: str, number: str, clause: str) -> None:
+        reference = ClauseReference(series=series, number=number, clause=clause)
         if reference not in seen:
             seen.add(reference)
             references.append(reference)
+
+    for match in CLAUSE_REFERENCE_PATTERN.finditer(flat):
+        add(match.group("series"), match.group("number"), match.group("clause"))
+
+    parent = _annex_parent(owner_reference)
+    if parent:
+        for match in NA_CLAUSE_PATTERN.finditer(flat):
+            add(parent[0], parent[1], match.group("clause"))
+
     return references
 
 
@@ -197,7 +246,9 @@ def enrich_project_references(project_id: str) -> int:
     for chunk_id, stored, meta, raw in zip(ids, stored_texts, metadatas, raw_texts):
         own_document_id = meta["document_id"]
         additions: list[str] = []
-        for reference in extract_clause_references(raw):
+        for reference in extract_clause_references(
+            raw, document_norm_refs.get(own_document_id)
+        ):
             matching = [
                 document_id
                 for document_id, norm_ref in document_norm_refs.items()

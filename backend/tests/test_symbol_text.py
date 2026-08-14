@@ -11,6 +11,8 @@ import pytest
 from services.pdf_highlight import _split_at_symbols
 from services.symbol_text import (
     ADOBE_SYMBOL,
+    _is_translatable,
+    _translate_symbol_spans,
     GID_TO_SYMBOL_CODE_OFFSET,
     _RESIDUAL_CONTROL,
     _is_symbol_font,
@@ -77,3 +79,81 @@ class TestHighlightFragments:
     def test_plain_text_is_returned_unchanged(self):
         text = "Ein Absatz ganz ohne Sonderzeichen aus der Norm"
         assert _split_at_symbols(text) == [text]
+
+
+class FakePage:
+    """Minimal stand-in: the translator only reads spans and their fonts."""
+
+    def __init__(self, spans):
+        self._spans = spans
+
+    def get_text(self, kind=None):
+        return {"blocks": [{"lines": [{"spans": [
+            {"font": font, "text": text} for font, text in self._spans
+        ]}]}]}
+
+
+class TestTranslatableCodes:
+    def test_control_codes_keep_the_full_table(self):
+        # Proven since the original fix, and no text font emits them.
+        assert _is_translatable(0x06, "α")
+        assert _is_translatable(0x03, "≤")
+
+    def test_printable_codes_are_admitted_only_into_greek(self):
+        # ÖNORM EN 1992-1-1 p. 98 draws α as 0x29 and ν as 0x2B.
+        assert _is_translatable(0x29, "α")
+        assert _is_translatable(0x2B, "ν")
+
+    def test_printable_codes_mapping_outside_greek_are_refused(self):
+        # EN 1991-1-4 p. 112 assembles a large bracket from high glyph ids;
+        # through the same offset those turned "3 4 5 6 7 8" into
+        # "⇐ ⇔ ∨ ⊂ ⊄ ⊇" — symbols that appear nowhere in norm prose.
+        assert not _is_translatable(0x33, "⇐")
+        assert not _is_translatable(0x31, "∠")
+
+    def test_layout_whitespace_is_never_translated(self):
+        # Replacing one collapses page structure: on EN 1991-1-4 p. 110 three
+        # newlines became "ηηη" and ran three formula lines together.
+        for code in (0x09, 0x0A, 0x0D):
+            assert not _is_translatable(code, "η")
+
+
+class TestPerSpanTranslation:
+    TABLE = {"SymbolMT": {0x29: "α", 0x2B: "ν"}}
+
+    def test_only_symbol_spans_are_rewritten(self):
+        # The decisive case, from EN 1992-1-1 eq (6.9): ")" and "+" are α and
+        # ν in SymbolMT, while the ")" and "+" of "(cot + tan )" on the same
+        # line are Arial and must survive untouched.
+        page = FakePage([
+            ("ArialMT", "= "), ("SymbolMT", ")"), ("ArialMT", "cw z "),
+            ("SymbolMT", "+"), ("ArialMT", "1 fcd/(cot + tan )"),
+        ])
+        text = "= )cw z +1 fcd/(cot + tan )"
+        assert _translate_symbol_spans(page, text, self.TABLE) == (
+            "= αcw z ν1 fcd/(cot + tan )"
+        )
+
+    def test_output_is_byte_identical_when_nothing_matches(self):
+        page = FakePage([("ArialMT", "keine Symbole hier")])
+        text = "keine Symbole hier"
+        assert _translate_symbol_spans(page, text, self.TABLE) is not None
+        assert _translate_symbol_spans(page, text, self.TABLE) == text
+
+    def test_a_repeated_span_matches_its_own_occurrence(self):
+        # The cursor has to advance, or the second ")" would rewrite the first.
+        page = FakePage([
+            ("ArialMT", ") "), ("SymbolMT", ")"),
+        ])
+        assert _translate_symbol_spans(page, ") )", self.TABLE) == ") α"
+
+    def test_an_unlocatable_span_is_skipped_not_guessed(self):
+        page = FakePage([("SymbolMT", ")"), ("SymbolMT", "+")])
+        # "+" is absent from the flat text; the ")" must still be translated
+        # and nothing else may move.
+        assert _translate_symbol_spans(page, "x ) y", self.TABLE) == "x α y"
+
+    def test_length_is_preserved_so_offsets_stay_valid(self):
+        page = FakePage([("SymbolMT", ")+")])
+        out = _translate_symbol_spans(page, ")+", self.TABLE)
+        assert out == "αν" and len(out) == 2
