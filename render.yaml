@@ -2,9 +2,22 @@ services:
   - type: web
     name: normchat
     runtime: docker
-    plan: free
+    # Standard, not starter: measured peak resident memory is ~1.2 GB with one
+    # corpus loaded (torch + chromadb 436 MB, the 21,909-chunk German corpus
+    # +396 MB via the per-query collection.get(), the cross-encoder +350 MB).
+    # Starter's 512 MB cannot hold it, and free instances cannot mount a disk
+    # at all.
+    plan: standard
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    # Uploaded PDFs, the per-project Chroma collections and the SQLite metadata
+    # all live here, so they survive redeploys and restarts. Sized against the
+    # two corpora actually in use: ~850 MB (DIN, 137 documents) + ~310 MB
+    # (ÖNORM, 39 documents).
+    disk:
+      name: normchat-data
+      mountPath: /var/data
+      sizeGB: 3
     envVars:
       - key: OPENAI_API_KEY
         sync: false
@@ -16,3 +29,9 @@ services:
         generateValue: true
       - key: SESSION_COOKIE_SECURE
         value: "true"
+      # Both are plain Settings fields, so pointing them at the mounted disk
+      # needs no code change. Four slashes: sqlite://// is an absolute path.
+      - key: STORAGE_DIR
+        value: /var/data/storage
+      - key: DATABASE_URL
+        value: sqlite:////var/data/normchat.db
