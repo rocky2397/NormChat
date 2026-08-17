@@ -20,7 +20,20 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
+
+# The cross-encoder is a ~470 MB HuggingFace download. Left to runtime it lands
+# on the first query after every deploy and every cold start -- on the critical
+# path of a user's question. Baking it in moves that to build time. HF_HOME is
+# set before the download and persists into the running image, so the runtime
+# finds the same cache. The model name is read from config rather than repeated
+# here, so it cannot drift from settings.reranker_model.
+ENV HF_HOME=/opt/huggingface
+RUN python -c "from config import settings; from sentence_transformers import CrossEncoder; CrossEncoder(settings.reranker_model)"
+
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# One worker deliberately. Each worker holds its own copy of the loaded corpus
+# and the cross-encoder (~1.2 GB measured with one corpus resident), so a second
+# one does not fit on the configured instance.
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

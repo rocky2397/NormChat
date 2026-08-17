@@ -4,9 +4,28 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from config import settings
 from db.database import Base, get_db
 from main import app
 from models.project import Project
+
+
+@pytest.fixture(autouse=True)
+def auth_gate_off_unless_a_test_asks_for_it(monkeypatch):
+    """Pin the login gate off, so no test depends on the developer's machine.
+
+    `Settings` reads `backend/.env` at import time (`config.py`), and that file
+    is gitignored -- so it exists locally and never in CI. Any test reaching an
+    `/api` route therefore passed in CI and returned 401 for anyone who had set
+    AUTH_USERNAME for their own use, which is how nine tests came to fail only
+    outside CI.
+
+    The tests that exercise the gate set the credentials in their own body,
+    which runs after this fixture; this removes only the ambient dependency on
+    an untracked file, not the ability to test authentication.
+    """
+    monkeypatch.setattr(settings, "auth_username", "")
+    monkeypatch.setattr(settings, "auth_password", "")
 
 
 @pytest.fixture()
