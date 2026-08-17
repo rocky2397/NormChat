@@ -5,7 +5,7 @@ import {
   getProject,
   listDocuments,
   listProjects,
-  uploadDocument,
+  uploadDocuments,
 } from '../api/client'
 import ChatPanel from '../components/ChatPanel'
 import DocumentUpload from '../components/DocumentUpload'
@@ -50,8 +50,8 @@ export default function ProjectView() {
     return () => window.removeEventListener('message', handleMessage)
   }, [])
 
-  async function handleUpload(file, onProgress) {
-    await uploadDocument(projectId, file, onProgress)
+  async function handleUpload(files, onProgress) {
+    await uploadDocuments(projectId, files, onProgress)
     await refresh()
   }
 

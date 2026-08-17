@@ -436,6 +436,117 @@ class TestIngestionFlag:
         assert document.id is not None
         assert "Reference enrichment failed" in caplog.text
 
+    def test_enrich_false_defers_the_pass_to_the_caller(
+        self, db_session, project, ingestion, monkeypatch
+    ):
+        # A batch caller ingests every file with enrich=False and runs
+        # run_enrichment_pass() itself, once after the last file.
+        ingestion_module, calls = ingestion
+        monkeypatch.setattr(
+            ingestion_module.settings, "reference_enrichment_enabled", True
+        )
+        for filename in (
+            "OENORM_B_1992_1_1_2018_01_01.pdf",
+            "OENORM_EN_1992_1_1_2015_02_15.pdf",
+        ):
+            ingestion_module.ingest_document(
+                db_session, project.id, filename, b"pdfbytes", enrich=False
+            )
+        assert calls == []
+
+        ingestion_module.run_enrichment_pass(project.id)
+        assert calls == [project.id]
+
+    def test_run_enrichment_pass_respects_the_flag(self, ingestion, monkeypatch):
+        ingestion_module, calls = ingestion
+        monkeypatch.setattr(
+            ingestion_module.settings, "reference_enrichment_enabled", False
+        )
+        ingestion_module.run_enrichment_pass("p")
+        assert calls == []
+
+
+class TestBatchUploadEndpoint:
+    """One multi-file request pays one enrichment pass, not one per file."""
+
+    @pytest.fixture()
+    def ingestion_calls(self, monkeypatch, tmp_path, fake_project):
+        import services.ingestion as ingestion_module
+        from services.chunking import PageText
+
+        def fake_extract_pages(path):
+            if "kaputt" in path:
+                raise RuntimeError("PDF nicht lesbar")
+            return [PageText(page_number=1, text=B_CHUNK)]
+
+        monkeypatch.setattr(ingestion_module, "extract_pages", fake_extract_pages)
+        monkeypatch.setattr(
+            ingestion_module, "get_collection", lambda project_id: fake_project
+        )
+        monkeypatch.setattr(ingestion_module, "get_embeddings", lambda: FakeEmbeddings())
+        monkeypatch.setattr(
+            ingestion_module, "get_project_documents_dir", lambda project_id: tmp_path
+        )
+        monkeypatch.setattr(
+            ingestion_module.settings, "reference_enrichment_enabled", True
+        )
+        calls = []
+        monkeypatch.setattr(
+            ingestion_module,
+            "enrich_project_references",
+            lambda project_id: calls.append(project_id),
+        )
+        return calls
+
+    @staticmethod
+    def _pdf(name):
+        return ("file", (name, b"pdfbytes", "application/pdf"))
+
+    def test_a_multi_file_upload_runs_one_enrichment_pass(
+        self, client, project, ingestion_calls
+    ):
+        response = client.post(
+            f"/api/projects/{project.id}/documents",
+            files=[
+                self._pdf("OENORM_B_1992_1_1_2018_01_01.pdf"),
+                self._pdf("OENORM_EN_1992_1_1_2015_02_15.pdf"),
+            ],
+        )
+        assert response.status_code == 201
+        assert len(response.json()) == 2
+        assert ingestion_calls == [project.id]
+
+    def test_a_single_file_upload_still_enriches_once(
+        self, client, project, ingestion_calls
+    ):
+        response = client.post(
+            f"/api/projects/{project.id}/documents",
+            files=[self._pdf("OENORM_B_1992_1_1_2018_01_01.pdf")],
+        )
+        assert response.status_code == 201
+        assert len(response.json()) == 1
+        assert ingestion_calls == [project.id]
+
+    def test_files_ingested_before_a_failure_are_still_enriched(
+        self, client, project, ingestion_calls
+    ):
+        response = client.post(
+            f"/api/projects/{project.id}/documents",
+            files=[self._pdf("gut.pdf"), self._pdf("kaputt.pdf")],
+        )
+        assert response.status_code == 500
+        assert ingestion_calls == [project.id]
+
+    def test_a_non_pdf_rejects_the_batch_before_ingesting_anything(
+        self, client, project, ingestion_calls
+    ):
+        response = client.post(
+            f"/api/projects/{project.id}/documents",
+            files=[self._pdf("gut.pdf"), ("file", ("notizen.txt", b"x", "text/plain"))],
+        )
+        assert response.status_code == 400
+        assert ingestion_calls == []
+
 
 class TestGermanNationalAnnexReferences:
     """DIN national annexes never name the norm they modify.

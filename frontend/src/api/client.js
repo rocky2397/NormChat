@@ -56,9 +56,11 @@ export async function listDocuments(projectId) {
   return data
 }
 
-export async function uploadDocument(projectId, file, onProgress) {
+export async function uploadDocuments(projectId, files, onProgress) {
   const formData = new FormData()
-  formData.append('file', file)
+  for (const file of files) {
+    formData.append('file', file)
+  }
   const { data } = await api.post(`/projects/${projectId}/documents`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: (event) => {
