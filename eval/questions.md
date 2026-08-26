@@ -150,6 +150,20 @@ not been signed off, and the probe skips that question. Labels are
 `(norm_reference, page)` pairs rather than chunk ids, because Chroma ids
 embed a per-ingestion document id and would not survive a re-ingest.
 
+Most questions also carry a **trace-gold block** — a fenced code block
+tagged `trace-gold`, read by `backend/services/retrieval_trace.py` for the
+per-question retrieval trace (`eval/retrieval_trace_cli.py`). Each line is
+one expected source, `norm_reference: page[: clause]`. Unlike the `gold`
+block, one line names exactly one page, and pages are never grouped under a
+shared `norm_reference:` prefix, because the trace resolves each line to the
+chunk(s) that carry that clause, not just to a page. Writing `*` instead of
+a page keeps the same document-level meaning as in the `gold` block, and
+omitting the clause (Q1, Q6, Q7) means the source is identified by page
+alone — a table or a figure has no single clause number to search for. The
+trace resolves every line against the full ingested corpus before running
+anything; a line matching no chunk is an error the run stops on, not a
+question that quietly scores zero recall.
+
 ---
 
 ## Q1
@@ -178,6 +192,11 @@ settled. The two listed are the ones the question cannot be answered
 without.
 
 ```gold
+ÖNORM EN 1995-1-2: *
+ÖNORM B 1995-1-2: *
+```
+
+```trace-gold
 ÖNORM EN 1995-1-2: *
 ÖNORM B 1995-1-2: *
 ```
@@ -234,6 +253,13 @@ its A/B was measured on every question except its own target.
 ÖNORM B 1995-1-2: 7
 ```
 
+```trace-gold
+ÖNORM EN 1995-1-2: 25: 3.4.2
+ÖNORM EN 1995-1-2: 35: 4.2.2
+ÖNORM EN 1995-1-2: 36: 4.2.3
+ÖNORM B 1995-1-2: 7: 6.1
+```
+
 - **Grading:**
   - `gut` — gives the charring-based procedure (`Abbrandtiefe`, reduced
     cross-section) with the Austrian values, citing `EN 1995-1-2` §3.4.x /
@@ -264,6 +290,11 @@ as the right EN citation (`eval/runs/2026-08-06-current.md`):
 ```gold
 ÖNORM EN 1992-1-1: 93, 97, 98
 ÖNORM B 1992-1-1: 21
+```
+
+```trace-gold
+ÖNORM EN 1992-1-1: 93: 6.2
+ÖNORM B 1992-1-1: 21: 9.2
 ```
 
 - **Grading:**
@@ -298,6 +329,11 @@ Gold block:
 ```gold
 ÖNORM EN 1992-1-1: 120
 ÖNORM B 1992-1-1: 28
+```
+
+```trace-gold
+ÖNORM EN 1992-1-1: 120: 6.5.4
+ÖNORM B 1992-1-1: 28: 9.5
 ```
 
 - **Grading:**
@@ -340,6 +376,11 @@ Gold block:
 ```gold
 ÖNORM EN 1992-1-1: 36
 ÖNORM B 1992-1-1: 12
+```
+
+```trace-gold
+ÖNORM EN 1992-1-1: 36: 3.1.6
+ÖNORM B 1992-1-1: 12: 6.1.4
 ```
 
 - **Grading:**
@@ -396,6 +437,17 @@ page* is reached.
 ÖNORM B 1992-1-1: 13, 14
 ```
 
+```trace-gold
+ÖNORM EN 1992-1-1: 56
+ÖNORM EN 1992-1-1: 57
+ÖNORM B 1992-1-1: 13
+ÖNORM B 1992-1-1: 14
+```
+
+Clause omitted on every line: the answer lives in a table cell, not a
+numbered clause, so there is no single clause number to resolve against —
+the source is identified by page alone.
+
 ## Q7
 
 > Wie wird die effektive Stützweite l_eff eines Stahlbetonbalkens bestimmt,
@@ -432,6 +484,12 @@ Gold block — the figure page.
 ```gold
 ÖNORM EN 1992-1-1: 66
 ```
+
+```trace-gold
+ÖNORM EN 1992-1-1: 66
+```
+
+Clause omitted: the figure's labels carry no clause number of their own.
 
 ---
 
