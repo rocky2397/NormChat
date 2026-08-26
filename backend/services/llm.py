@@ -789,8 +789,14 @@ def _ground_excerpt(excerpt: str, chunk_text: str, threshold: float = 0.35) -> s
     return best_candidate if best_score >= threshold else None
 
 
-def chat(project_id: str, question: str) -> ChatResponse:
-    sources = retrieve_sources(project_id, question)
+def chat(
+    project_id: str, question: str, trace: RetrievalTrace | None = None
+) -> ChatResponse:
+    """`trace`, when given, is filled in with the per-stage id lists from
+    retrieve_sources() — see RetrievalTrace. Passing one changes nothing
+    about the sources or answer returned; it is a write-only observation
+    point for eval/retrieval_trace_cli.py."""
+    sources = retrieve_sources(project_id, question, trace=trace)
     answer = generate_answer(question, sources)
     excerpts = extract_citation_excerpts(question, answer, sources)
     for i, source in enumerate(sources, start=1):
