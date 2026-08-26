@@ -152,8 +152,8 @@ embed a per-ingestion document id and would not survive a re-ingest.
 
 Most questions also carry a **trace-gold block** — a fenced code block
 tagged `trace-gold`, read by `backend/services/retrieval_trace.py` for the
-per-question retrieval trace (`eval/retrieval_trace_cli.py`). Each line is
-one expected source, `norm_reference: page[: clause]`. Unlike the `gold`
+per-question retrieval trace (`backend/eval/retrieval_trace_cli.py`). Each
+line is one expected source, `norm_reference: page[: clause]`. Unlike the `gold`
 block, one line names exactly one page, and pages are never grouped under a
 shared `norm_reference:` prefix, because the trace resolves each line to the
 chunk(s) that carry that clause, not just to a page. Writing `*` instead of
