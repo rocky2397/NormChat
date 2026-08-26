@@ -19,6 +19,14 @@ jobs:
       project_owner: rocky2397
       owner_type: user
       wip_limit: 1
+      # claude-fable-5 (the reusable default) is out of usage credits on this
+      # account and returns "Switch to another model to continue" as a 429
+      # before doing any work. --fallback-model does not rescue it: the
+      # fallback fires on overload, not on a credits rejection, so the primary
+      # has to be a model with headroom. Every scheduled run from 2026-08-17
+      # to 2026-08-26 failed this way.
+      model: claude-sonnet-5
+      fallback_model: claude-opus-5
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
@@ -43,5 +51,9 @@ jobs:
       pull-requests: write
       id-token: write
     uses: rocky2397/claude-automation/.github/workflows/reusable-worker.yml@main
+    with:
+      # Same reason as the prioritizer above. The worker keeps opus-5 as its
+      # fallback: it writes code, so the worse failure is weaker, not dearer.
+      model: claude-sonnet-5
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
