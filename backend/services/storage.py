@@ -37,6 +37,28 @@ def get_collection(project_id: str):
     )
 
 
+# A project's collection is read whole on every query (services/llm.py caches
+# it), so the query side needs to know when a write has made that copy stale.
+# Chroma exposes no cheap change token: count() misses reference enrichment,
+# which rewrites a chunk's indexed text in place and leaves both the id set and
+# the count untouched. This counter is bumped by every write path instead.
+#
+# In-process state is sufficient because the app runs a single uvicorn worker
+# -- pinned deliberately in the Dockerfile, because a second worker duplicates
+# the corpus and the cross-encoder and does not fit the instance. A multi-worker
+# deployment would need this in shared storage.
+_collection_versions: dict[str, int] = {}
+
+
+def bump_collection_version(project_id: str) -> None:
+    """Marks a project's collection as changed. Call after any write to it."""
+    _collection_versions[project_id] = _collection_versions.get(project_id, 0) + 1
+
+
+def get_collection_version(project_id: str) -> int:
+    return _collection_versions.get(project_id, 0)
+
+
 def init_project_storage(project_id: str) -> None:
     get_project_documents_dir(project_id)
     get_collection(project_id)

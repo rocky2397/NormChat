@@ -15,6 +15,7 @@ from services.embeddings import get_embeddings
 from services.norm_identity import parse_identity
 from services.reference_resolution import enrich_project_references
 from services.storage import (
+    bump_collection_version,
     extract_norm_reference,
     get_collection,
     get_project_documents_dir,
@@ -98,6 +99,7 @@ def ingest_document(
             metadatas=metadatas,
         )
 
+    bump_collection_version(project_id)
     db.commit()
     db.refresh(document)
 
@@ -121,6 +123,10 @@ def run_enrichment_pass(project_id: str) -> None:
         enrich_project_references(project_id)
     except Exception:
         logger.exception("Reference enrichment failed for project %s", project_id)
+    finally:
+        # Bumped even when the pass fails: it re-embeds as it goes, so a
+        # failure part-way through still leaves the collection changed.
+        bump_collection_version(project_id)
 
 
 def delete_document_vectors(project_id: str, document_id: str) -> None:
@@ -128,6 +134,7 @@ def delete_document_vectors(project_id: str, document_id: str) -> None:
     existing = collection.get(where={"document_id": document_id})
     if existing["ids"]:
         collection.delete(ids=existing["ids"])
+        bump_collection_version(project_id)
 
 
 def remove_document_file(file_path: str) -> None:

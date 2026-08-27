@@ -15,7 +15,7 @@ from services.reference_resolution import (
     extract_clause_references,
 )
 from services.reranking import bm25_rank_ids, reciprocal_rank_fusion, rerank_ids
-from services.storage import get_collection
+from services.storage import get_collection, get_collection_version
 
 SYSTEM_PROMPT = """Du bist ein technischer Assistent für Bauingenieure und Architekten in der DACH-Region.
 Beantworte Fragen ausschließlich auf Basis des bereitgestellten Kontexts aus Normdokumenten.
@@ -475,7 +475,7 @@ class Corpus:
         return self.id_to_doc[chunk_id]
 
 
-def _load_corpus(collection) -> Corpus:
+def _read_corpus(collection) -> Corpus:
     all_chunks = collection.get(include=["documents", "metadatas"])
     ids = all_chunks["ids"]
     documents = all_chunks["documents"]
@@ -485,6 +485,45 @@ def _load_corpus(collection) -> Corpus:
         id_to_doc=dict(zip(ids, documents)),
         id_to_meta=dict(zip(ids, all_chunks["metadatas"])),
     )
+
+
+# One slot, holding the corpus across queries rather than rebuilding it per
+# query. Reading it costs ~300 MB on the 137-document DIN corpus -- ~100 MB of
+# chunk text and ~200 MB of metadata, which carries raw_text and so stores
+# every chunk a second time. Allocating and freeing that on every question made
+# resident memory ratchet upward even though logical usage was flat, because
+# large freed blocks are not returned to the OS; the instance died of it at
+# roughly the seventh question. Holding one copy trades a higher, *flat*
+# baseline for no per-query churn.
+#
+# Keyed on the write counter from services/storage.py rather than on anything
+# derived from the corpus: count() alone would miss reference enrichment, which
+# rewrites chunk text in place without changing the id set, and any content
+# digest would have to read the corpus to compute -- which is the cost being
+# avoided.
+_corpus_cache: tuple[str, int, Corpus] | None = None
+
+
+def _load_corpus(collection, project_id: str) -> Corpus:
+    global _corpus_cache
+    version = get_collection_version(project_id)
+    if _corpus_cache is not None:
+        cached_project, cached_version, cached_corpus = _corpus_cache
+        if cached_project == project_id and cached_version == version:
+            return cached_corpus
+    # Drop the old corpus before reading the new one, so a project switch or a
+    # re-ingest never holds two.
+    _corpus_cache = None
+    corpus = _read_corpus(collection)
+    _corpus_cache = (project_id, version, corpus)
+    return corpus
+
+
+def clear_corpus_cache() -> None:
+    """Empties the slot. For tests, and for anything that needs the next query
+    to re-read from Chroma."""
+    global _corpus_cache
+    _corpus_cache = None
 
 
 def _query_plan(question: str) -> list[str]:
@@ -615,7 +654,7 @@ def retrieve_sources(
         return []
     pool_size = min(settings.retrieval_candidate_pool, total)
 
-    corpus = _load_corpus(collection)
+    corpus = _load_corpus(collection, project_id)
     embeddings = get_embeddings()
 
     rankings: list[list[str]] = []
