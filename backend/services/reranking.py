@@ -1,4 +1,6 @@
+import hashlib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -67,20 +69,100 @@ class _LexicalIndex:
     vocabulary: frozenset[str]
 
 
-# Building this tokenizes the whole corpus, and it was rebuilt on every call:
-# once per request with expansion off, and once per sub-query with it on, so
-# a five-probe request tokenized ~20k chunks five times while the user waited.
-# The corpus itself is the cache key, so an ingest invalidates it by changing
-# the ids; maxsize=1 keeps a single project's index resident, which matters on
-# a small instance where the tokenized corpus is the largest object in memory.
-@lru_cache(maxsize=1)
-def _get_lexical_index(ids: tuple[str, ...], documents: tuple[str, ...]) -> _LexicalIndex:
+def _build_lexical_index(
+    ids: tuple[str, ...], documents: Sequence[str]
+) -> _LexicalIndex:
     tokenized = [_tokenize(doc) for doc in documents]
     return _LexicalIndex(
         bm25=BM25Okapi(tokenized),
         ids=ids,
         vocabulary=frozenset(word for doc in tokenized for word in doc),
     )
+
+
+def _documents_digest(documents: Sequence[str]) -> str:
+    """Content fingerprint of a corpus, computed without retaining it.
+
+    Identity cannot come from the ids alone: reference enrichment rewrites a
+    chunk's indexed text in place and leaves its id untouched, and a stale
+    index would then rank text that no longer exists. Hashing streams over the
+    documents and keeps sixteen bytes.
+    """
+    digest = hashlib.blake2b(digest_size=16)
+    for document in documents:
+        digest.update(document.encode("utf-8"))
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
+@dataclass
+class _CacheInfo:
+    hits: int = 0
+    misses: int = 0
+
+
+class _LexicalIndexCache:
+    """One slot, keyed by corpus *identity* rather than by the corpus itself.
+
+    Building the index tokenizes the whole corpus, so it is built once per
+    corpus rather than once per query -- with expansion on it was otherwise
+    rebuilt five times for a single request.
+
+    Holding it in an `lru_cache` keyed on (ids, documents) was correct and
+    quietly expensive: the cache retained a reference to every chunk string it
+    was built from. The next query loaded a fresh copy of the corpus from
+    Chroma while the previous copy was still reachable through that key, so two
+    full corpora were resident at once. On the 137-document DIN corpus that is
+    roughly 800 MB of chunk text, which is what took the *second* query of a
+    session over a 2 GB instance limit and killed the process.
+
+    Keying on a digest keeps the invalidation behaviour exactly -- a changed
+    id set or changed chunk text still rebuilds -- while letting the previous
+    corpus be collected. The slot is emptied before a rebuild, so a rebuild
+    never holds two tokenized corpora either.
+    """
+
+    def __init__(self) -> None:
+        self._key: tuple[tuple[str, ...], str] | None = None
+        self._index: _LexicalIndex | None = None
+        self._info = _CacheInfo()
+
+    def get(self, ids: tuple[str, ...], documents: Sequence[str]) -> _LexicalIndex:
+        key = (ids, _documents_digest(documents))
+        if self._index is not None and self._key == key:
+            self._info.hits += 1
+            return self._index
+        # Drop the old index before building the new one.
+        self._key = None
+        self._index = None
+        self._info.misses += 1
+        index = _build_lexical_index(ids, documents)
+        self._key = key
+        self._index = index
+        return index
+
+    def clear(self) -> None:
+        self._key = None
+        self._index = None
+        self._info = _CacheInfo()
+
+    def info(self) -> _CacheInfo:
+        return self._info
+
+
+_lexical_index_cache = _LexicalIndexCache()
+
+
+def _get_lexical_index(
+    ids: tuple[str, ...], documents: Sequence[str]
+) -> _LexicalIndex:
+    return _lexical_index_cache.get(ids, documents)
+
+
+# Kept so callers and tests keep the `lru_cache` surface they were written
+# against.
+_get_lexical_index.cache_clear = _lexical_index_cache.clear
+_get_lexical_index.cache_info = _lexical_index_cache.info
 
 
 def bm25_rank_ids(query: str, ids: list[str], documents: list[str]) -> list[str]:
@@ -91,7 +173,7 @@ def bm25_rank_ids(query: str, ids: list[str], documents: list[str]) -> list[str]
     """
     if not documents:
         return []
-    index = _get_lexical_index(tuple(ids), tuple(documents))
+    index = _get_lexical_index(tuple(ids), documents)
     scores = index.bm25.get_scores(_expand_compounds(_tokenize(query), index.vocabulary))
     order = sorted(range(len(documents)), key=lambda i: scores[i], reverse=True)
     return [index.ids[i] for i in order]

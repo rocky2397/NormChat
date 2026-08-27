@@ -95,3 +95,51 @@ class TestLexicalIndexCache:
     def test_empty_corpus_is_handled_before_the_index_is_built(self):
         assert bm25_rank_ids("Querkraft", [], []) == []
         assert _get_lexical_index.cache_info().misses == 0
+
+
+class TestLexicalIndexMemory:
+    """The cache used to key on the corpus itself, which kept it alive.
+
+    An `lru_cache` on (ids, documents) retains a reference to every chunk
+    string it was built from. The next query pulled a fresh copy of the corpus
+    out of Chroma while the previous copy was still reachable through that
+    key, so two full corpora sat in memory at once -- what took the second
+    query of a session over a 2 GB instance limit on the DIN corpus.
+    """
+
+    def test_chunk_text_is_released_once_the_caller_drops_it(self):
+        import gc
+        import weakref
+
+        class _Chunk(str):
+            """`str` subclasses are weak-referenceable; plain `str` is not."""
+
+        documents = [_Chunk(text) for text in DOCS]
+        witnesses = [weakref.ref(document) for document in documents]
+
+        bm25_rank_ids("Querkraft", IDS, documents)
+
+        del documents
+        gc.collect()
+
+        assert [witness() for witness in witnesses] == [None] * len(DOCS)
+
+    def test_enriched_text_under_unchanged_ids_still_rebuilds(self):
+        # Reference enrichment rewrites a chunk's indexed text in place and
+        # leaves its id alone, so ids alone cannot identify a corpus. Serving
+        # the stale index here would rank text that no longer exists.
+        bm25_rank_ids("Querkraft", IDS, DOCS)
+        builds = _get_lexical_index.cache_info().misses
+
+        enriched = list(DOCS)
+        enriched[0] = f"{DOCS[0]} — Festlegung zu Abschnitt 6.2.3"
+        bm25_rank_ids("Querkraft", IDS, enriched)
+
+        assert _get_lexical_index.cache_info().misses == builds + 1
+
+    def test_identical_text_under_identical_ids_is_served_from_the_slot(self):
+        bm25_rank_ids("Querkraft", IDS, DOCS)
+        builds = _get_lexical_index.cache_info().misses
+        # A separate list with equal content is the same corpus.
+        bm25_rank_ids("Querkraft", list(IDS), list(DOCS))
+        assert _get_lexical_index.cache_info().misses == builds
