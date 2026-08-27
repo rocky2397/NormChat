@@ -28,6 +28,19 @@ def auth_gate_off_unless_a_test_asks_for_it(monkeypatch):
     monkeypatch.setattr(settings, "auth_password", "")
 
 
+@pytest.fixture(autouse=True)
+def _empty_the_corpus_cache():
+    """The corpus is cached across queries, keyed by project id and a write
+    counter. Tests build different in-memory collections under the same project
+    id, and every fresh process starts that counter at zero, so without this
+    one test would be served the previous test's corpus."""
+    from services.llm import clear_corpus_cache
+
+    clear_corpus_cache()
+    yield
+    clear_corpus_cache()
+
+
 @pytest.fixture()
 def db_session():
     engine = create_engine(
