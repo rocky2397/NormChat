@@ -6,11 +6,7 @@ function truncate(text, maxLength = 180) {
 
 export default function SourceCard({ source, onOpen }) {
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(source)}
-      className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-400 hover:shadow"
-    >
+    <div className="w-full rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-400 hover:shadow">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-slate-900">
@@ -25,7 +21,13 @@ export default function SourceCard({ source, onOpen }) {
       <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-700">
         {truncate(source.chunk_text)}
       </p>
-      <p className="mt-3 text-xs font-medium text-slate-600">Im PDF anzeigen →</p>
-    </button>
+      <button
+        type="button"
+        onClick={() => onOpen(source)}
+        className="mt-3 text-xs font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline"
+      >
+        Im PDF anzeigen →
+      </button>
+    </div>
   )
 }

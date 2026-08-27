@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { sendChatMessage } from '../api/client'
 import AnswerText from './AnswerText'
 import FeedbackWidget from './FeedbackWidget'
-import SourceCard from './SourceCard'
+import SourceList from './SourceList'
 
 export default function ChatPanel({ projectId, onOpenSource, disabled = false }) {
   const [messages, setMessages] = useState([])
@@ -84,18 +84,10 @@ export default function ChatPanel({ projectId, onOpenSource, disabled = false })
                 <p className="whitespace-pre-wrap">{message.content}</p>
               )}
               {message.sources?.length > 0 && (
-                <div className="mt-4 space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Quellen
-                  </p>
-                  {message.sources.map((source, sourceIndex) => (
-                    <SourceCard
-                      key={`${source.document_id}-${source.page_number}-${sourceIndex}`}
-                      source={source}
-                      onOpen={() => onOpenSource(message.sources, sourceIndex)}
-                    />
-                  ))}
-                </div>
+                <SourceList
+                  sources={message.sources}
+                  onOpenSource={onOpenSource}
+                />
               )}
               {message.role === 'assistant' && (
                 <FeedbackWidget
