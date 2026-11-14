@@ -6,6 +6,13 @@ on:
   issues:
     types: [opened, labeled]
 
+# Issue-triggered jobs run Claude on issue text with the subscription token,
+# and the worker runs with --dangerously-skip-permissions. In a public repo
+# anyone can open an issue, and the tester-feedback form auto-applies
+# `feedback-raw`, so both issue jobs only run for issues whose author is the
+# repo owner, an org member or an invited collaborator. Outside testers have
+# to be added as collaborators before their feedback is triaged.
+
 jobs:
   prioritize:
     if: github.event_name != 'issues'
@@ -34,7 +41,8 @@ jobs:
   triage:
     if: >-
       github.event_name == 'issues' && github.event.action == 'opened' &&
-      contains(github.event.issue.labels.*.name, 'feedback-raw')
+      contains(github.event.issue.labels.*.name, 'feedback-raw') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
     permissions:
       contents: read
       issues: write
@@ -44,7 +52,9 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
   work:
-    if: github.event_name == 'issues' && github.event.label.name == 'claude-work'
+    if: >-
+      github.event_name == 'issues' && github.event.label.name == 'claude-work' &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
     permissions:
       contents: write
       issues: write
