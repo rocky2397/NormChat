@@ -79,6 +79,83 @@ App: http://127.0.0.1:5173 — API docs: http://127.0.0.1:8000/docs
 
 Documents and embeddings are isolated per project. Norm PDFs are never bundled with the application — engineers upload their own legally obtained copies.
 
+## Evaluation
+
+The hard case for norm RAG is not finding *a* plausible passage. It is citing
+the **ÖNORM EN clause together with its ÖNORM B national supplement**, which
+shares clause numbers and vocabulary with the EN text. An answer that cites
+only the EN where a national deviation applies is wrong, however well it reads.
+
+The question set is **7 real questions from a practising Austrian structural
+engineer**, not synthetic ones, run against the full Austrian Eurocode corpus
+(39 PDFs, EN and B variants; ~10.5k chunks). It is graded in two layers.
+
+### 1. End-to-end answer grading
+
+Each answer gets three checks: a **substantive** national-annex clause is
+cited (a cover, foreword or contents page does not count), the cited clause
+is the right one, and the PDF highlight lands on the sentence the answer
+relied on. Grades are `gut` / `mittel` / `schlecht` (good / partial / fail).
+An **unsourced claim is `schlecht`**, worse than an honest gap. All runs were
+re-scored when this rule was tightened, so the trend is comparable. Selected
+runs:
+
+| run | Q1 | Q2 | Q3 | Q4 | Q5 |
+| --- | --- | --- | --- | --- | --- |
+| 1 · baseline | gut | mittel | schlecht | schlecht | schlecht |
+| 5 · clause lookup | gut | mittel | schlecht | schlecht | **gut** |
+| 8 · + compound expansion, part-conflict handling | gut | mittel | schlecht | **mittel** | gut |
+| 2026-08-13 · clause ordering (Q3 re-run only) | | | **gut** | | |
+
+Baseline → current: **1 → 3 questions at `gut`, 3 → 0 at `schlecht`**
+(counting the Q3 re-run). Q3 needed three stacked fixes, each invisible until
+the previous one landed: the B document's register table was winning every
+clause lookup, page deduplication was blocking the right clause, and the
+clause-lookup limit was one too small. Q2 has been `mittel` in every run. Full
+history: [`eval/runs/README.md`](eval/runs/README.md); rubric and gold labels:
+[`eval/questions.md`](eval/questions.md).
+
+### 2. Per-stage retrieval probe
+
+A headless probe runs retrieval only, with no answer generation, and reports
+where each gold `(norm, page)` label ranks at every pipeline stage. That
+separates "never retrieved" from "dropped by the reranker" from "in context
+but ignored", which an end-to-end grade cannot.
+
+| stage | recall@10 | recall@100 |
+| --- | --- | --- |
+| dense | 8/13 (0.62) | 11/13 (0.85) |
+| lexical (BM25) | 6/13 (0.46) | 8/13 (0.62) |
+| fused | 6/13 (0.46) | **12/13 (0.92)** |
+| reranked | 6/13 (0.46) | 6/13 (0.46) |
+| + annex-delta admission | 6/13 (0.46) | 8/13 (0.62) |
+| final context | 6/13 (0.46) | 9/13 (0.69) |
+
+**What it shows:** the candidate pool is good. Fusion recovers 12 of 13 gold
+passages in the top 100. The loss happens at the **reranker cut**, which the
+annex-delta admission and clause-lookup stages partly win back. That is where
+the next work goes. Run it yourself from `backend/`:
+
+```bash
+python -m eval.retrieval_probe --project <project-id>
+```
+
+When the pipeline was refactored into named stages, success meant the eval
+*not* moving: the probe output and the returned sources for all 7 questions
+were byte-identical before and after, and all 179 tests passed with no test
+changes.
+
+### Caveats
+
+- **Small set:** 7 questions and 13 gold labels. These are regression signals,
+  not benchmark numbers, and `CLAUSE_LOOKUP_LIMIT` is explicitly fitted to them.
+- Answer grades were assigned by Claude on a single generation at non-zero
+  temperature, and the highlight check was not run for every row.
+- The Q3 `gut` comes from a single-question re-run. The full table is due to
+  be regenerated in one pass by a human once the question set is confirmed.
+- A PDF-extraction defect still corrupts one formula (`V_Rd,max`) on one page.
+  It is tracked separately.
+
 ## Development order
 
 Built according to `SPEC.md`:
